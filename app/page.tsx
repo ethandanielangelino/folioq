@@ -1,56 +1,73 @@
-import Image from "next/image";
+import Link from "next/link";
+import SiteHeader from "@/app/components/site-header";
 
 export default function Home() {
   return (
-    <div className="flex flex-1 items-center justify-center bg-zinc-50 px-4 dark:bg-black">
-      <div className="w-full max-w-sm rounded-2xl border border-black/[.08] bg-white p-8 shadow-sm dark:border-white/[.08] dark:bg-zinc-900">
-        <div className="flex flex-col items-center text-center">
-          <Image
-            src="/FolioQ-logo.png"
-            alt="FolioQ"
-            width={44}
-            height={44}
-            className="h-11 w-11 rounded-xl"
-            priority
-          />
-          <h1 className="mt-5 text-2xl font-semibold tracking-tight text-black dark:text-zinc-50">
-            Welcome to FolioQ
-          </h1>
-          <p className="mt-2 text-sm text-zinc-500 dark:text-zinc-400">
-            Sign in to your account to continue
-          </p>
+    <div className="flex flex-1 flex-col bg-zinc-50 dark:bg-black">
+      <SiteHeader />
+
+      <main className="mx-auto flex w-full max-w-6xl flex-1 flex-col items-center px-6 py-16 text-center sm:px-10 sm:py-24 lg:px-16">
+        <h1 className="max-w-2xl text-4xl font-semibold text-black sm:text-5xl dark:text-zinc-50">
+          Track your investments with clarity.
+        </h1>
+        <p className="mt-6 max-w-xl text-lg leading-8 text-zinc-600 dark:text-zinc-400">
+          FolioQ helps you build, monitor, and understand your investment
+          portfolios in one place — from real-time quotes to long-term
+          performance, without the noise.
+        </p>
+        <div className="mt-10 flex flex-col gap-3 sm:flex-row">
+          <Link
+            href="/signup"
+            className="rounded-full bg-black px-6 py-3 text-sm font-medium text-white transition-colors hover:bg-zinc-800 dark:bg-white dark:text-black dark:hover:bg-zinc-200"
+          >
+            Get started
+          </Link>
+          <Link
+            href="/login"
+            className="rounded-full border border-black/[.08] px-6 py-3 text-sm font-medium text-zinc-800 transition-colors hover:bg-black/[.04] dark:border-white/[.145] dark:text-zinc-100 dark:hover:bg-white/[.06]"
+          >
+            Log in
+          </Link>
         </div>
 
-        <button
-          type="button"
-          className="mt-8 flex w-full items-center justify-center gap-3 rounded-full border border-black/[.08] bg-white px-5 py-3 text-sm font-medium text-zinc-800 transition-colors hover:bg-zinc-50 dark:border-white/[.145] dark:bg-zinc-900 dark:text-zinc-100 dark:hover:bg-zinc-800"
-        >
-          <svg className="h-5 w-5" viewBox="0 0 24 24" aria-hidden="true">
-            <path
-              fill="#4285F4"
-              d="M23.49 12.27c0-.79-.07-1.54-.2-2.27H12v4.3h6.47a5.53 5.53 0 0 1-2.4 3.63v3h3.88c2.27-2.09 3.54-5.17 3.54-8.66Z"
-            />
-            <path
-              fill="#34A853"
-              d="M12 24c3.24 0 5.95-1.07 7.93-2.9l-3.88-3.02c-1.08.72-2.45 1.15-4.05 1.15-3.11 0-5.75-2.1-6.69-4.93H1.3v3.11A12 12 0 0 0 12 24Z"
-            />
-            <path
-              fill="#FBBC05"
-              d="M5.31 14.3a7.2 7.2 0 0 1 0-4.6V6.59H1.3a12 12 0 0 0 0 10.82l4.01-3.11Z"
-            />
-            <path
-              fill="#EA4335"
-              d="M12 4.77c1.76 0 3.35.61 4.6 1.8l3.44-3.44C17.94 1.19 15.24 0 12 0A12 12 0 0 0 1.3 6.59l4.01 3.11C6.25 6.87 8.89 4.77 12 4.77Z"
-            />
-          </svg>
-          Continue with Google
-        </button>
+        <div className="mt-24 grid w-full gap-6 text-left sm:grid-cols-3">
+          <FeatureCard
+            title="Portfolio tracking"
+            description="See every holding, allocation, and gain or loss in one clean dashboard that updates as the market moves."
+          />
+          <FeatureCard
+            title="Real-time quotes"
+            description="Prices pulled straight from the market, so you're always looking at current data, not yesterday's close."
+          />
+          <FeatureCard
+            title="Built to share"
+            description="Invite classmates, collaborators, or clients to view a portfolio without handing over the keys."
+          />
+        </div>
+      </main>
 
-        <p className="mt-6 text-center text-xs text-zinc-400 dark:text-zinc-500">
-          By continuing, you agree to our Terms of Service and Privacy
-          Policy.
-        </p>
-      </div>
+      <footer className="mx-auto w-full max-w-6xl px-6 py-10 text-center text-xs text-zinc-400 dark:text-zinc-500 sm:px-10 lg:px-16">
+        © {new Date().getFullYear()} FolioQ. All rights reserved.
+      </footer>
+    </div>
+  );
+}
+
+function FeatureCard({
+  title,
+  description,
+}: {
+  title: string;
+  description: string;
+}) {
+  return (
+    <div className="rounded-2xl border border-black/[.08] bg-white p-6 dark:border-white/[.08] dark:bg-zinc-900">
+      <h3 className="text-sm font-semibold text-black dark:text-zinc-50">
+        {title}
+      </h3>
+      <p className="mt-2 text-sm leading-6 text-zinc-500 dark:text-zinc-400">
+        {description}
+      </p>
     </div>
   );
 }
