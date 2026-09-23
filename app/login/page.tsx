@@ -6,6 +6,10 @@ import Link from 'next/link'
 import Image from 'next/image'
 import { createClient } from '@/lib/supabase/client'
 import GoogleIcon from '@/app/components/google-icon'
+import PasswordInput from '@/app/components/password-input'
+import { Card } from '@/components/ui/card'
+import { Input } from '@/components/ui/input'
+import { Button } from '@/components/ui/button'
 
 export default function LoginPage() {
   const router = useRouter()
@@ -47,7 +51,7 @@ export default function LoginPage() {
 
   return (
     <div className="flex flex-1 items-center justify-center bg-zinc-50 px-4 dark:bg-black">
-      <div className="w-full max-w-sm rounded-3xl border border-black/[.08] bg-white p-10 shadow-sm dark:border-white/[.08] dark:bg-zinc-900">
+      <Card className="block w-full max-w-sm gap-0 rounded-3xl border border-black/[.08] bg-white p-10 shadow-sm ring-0 dark:border-white/[.08] dark:bg-zinc-900">
         <div className="flex flex-col items-center text-center">
           <Image
             src="/FolioQ-logo.png"
@@ -66,19 +70,17 @@ export default function LoginPage() {
         </div>
 
         <div className="mt-10 flex flex-col gap-5">
-          <input
+          <Input
             type="email"
             placeholder="you@university.edu"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            className="w-full rounded-2xl border border-black/[.08] bg-white px-5 py-3.5 text-sm text-black outline-none placeholder:text-zinc-400 focus:border-black/[.2] dark:border-white/[.145] dark:bg-zinc-900 dark:text-zinc-50 dark:focus:border-white/[.3]"
+            className="h-auto w-full rounded-2xl border-black/[.08] bg-white px-5 py-3.5 text-sm text-black placeholder:text-zinc-400 focus-visible:border-black/[.2] focus-visible:ring-0 dark:border-white/[.145] dark:bg-zinc-900 dark:text-zinc-50 dark:focus-visible:border-white/[.3]"
           />
-          <input
-            type="password"
+          <PasswordInput
             placeholder="Password"
             value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            className="w-full rounded-2xl border border-black/[.08] bg-white px-5 py-3.5 text-sm text-black outline-none placeholder:text-zinc-400 focus:border-black/[.2] dark:border-white/[.145] dark:bg-zinc-900 dark:text-zinc-50 dark:focus:border-white/[.3]"
+            onChange={setPassword}
           />
         </div>
 
@@ -86,13 +88,13 @@ export default function LoginPage() {
           <p className="mt-4 text-sm text-red-600 dark:text-red-400">{error}</p>
         )}
 
-        <button
+        <Button
           onClick={handleLogin}
           disabled={loading}
-          className="mt-7 w-full rounded-full bg-black px-5 py-3.5 text-sm font-medium text-white transition-colors hover:bg-zinc-800 disabled:opacity-50 dark:bg-white dark:text-black dark:hover:bg-zinc-200"
+          className="mt-7 h-auto w-full rounded-full bg-black px-5 py-3.5 text-sm font-medium text-white hover:bg-zinc-800 disabled:opacity-50 dark:bg-white dark:text-black dark:hover:bg-zinc-200"
         >
           {loading ? 'Logging in…' : 'Log in'}
-        </button>
+        </Button>
 
         <div className="my-8 flex items-center gap-3">
           <div className="h-px flex-1 bg-black/[.08] dark:bg-white/[.08]" />
@@ -100,14 +102,15 @@ export default function LoginPage() {
           <div className="h-px flex-1 bg-black/[.08] dark:bg-white/[.08]" />
         </div>
 
-        <button
+        <Button
           type="button"
+          variant="outline"
           onClick={handleGoogle}
-          className="flex w-full items-center justify-center gap-3 rounded-full border border-black/[.08] bg-white px-5 py-3.5 text-sm font-medium text-zinc-800 transition-colors hover:bg-zinc-50 dark:border-white/[.145] dark:bg-zinc-900 dark:text-zinc-100 dark:hover:bg-zinc-800"
+          className="flex h-auto w-full items-center justify-center gap-3 rounded-full border-black/[.08] bg-white px-5 py-3.5 text-sm font-medium text-zinc-800 hover:bg-zinc-50 hover:text-zinc-800 dark:border-white/[.145] dark:bg-zinc-900 dark:text-zinc-100 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
         >
           <GoogleIcon />
           Continue with Google
-        </button>
+        </Button>
 
         <p className="mt-8 text-center text-sm text-zinc-500 dark:text-zinc-400">
           Do not have an account?{' '}
@@ -118,7 +121,7 @@ export default function LoginPage() {
             Sign up here
           </Link>
         </p>
-      </div>
+      </Card>
     </div>
   )
 }

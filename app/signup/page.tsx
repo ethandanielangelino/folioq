@@ -4,6 +4,13 @@ import { useState } from 'react'
 import Link from 'next/link'
 import Image from 'next/image'
 import { createClient } from '@/lib/supabase/client'
+import PasswordInput from '@/app/components/password-input'
+import { Card } from '@/components/ui/card'
+import { Input } from '@/components/ui/input'
+import { Button } from '@/components/ui/button'
+
+const inputClassName =
+  'h-auto w-full rounded-2xl border-black/[.08] bg-white px-5 py-3.5 text-sm text-black placeholder:text-zinc-400 focus-visible:border-black/[.2] focus-visible:ring-0 dark:border-white/[.145] dark:bg-zinc-900 dark:text-zinc-50 dark:focus-visible:border-white/[.3]'
 
 export default function SignupPage() {
   const [fullName, setFullName] = useState('')
@@ -52,7 +59,7 @@ export default function SignupPage() {
   if (sent) {
     return (
       <div className="flex flex-1 items-center justify-center bg-zinc-50 px-4 dark:bg-black">
-        <div className="w-full max-w-sm rounded-3xl border border-black/[.08] bg-white p-10 text-center shadow-sm dark:border-white/[.08] dark:bg-zinc-900">
+        <Card className="block w-full max-w-sm gap-0 rounded-3xl border border-black/[.08] bg-white p-10 text-center shadow-sm ring-0 dark:border-white/[.08] dark:bg-zinc-900">
           <Image
             src="/FolioQ-logo.png"
             alt="FolioQ"
@@ -68,14 +75,14 @@ export default function SignupPage() {
             We sent a confirmation link to {email}. Click it to activate your
             account.
           </p>
-        </div>
+        </Card>
       </div>
     )
   }
 
   return (
     <div className="flex flex-1 items-center justify-center bg-zinc-50 px-4 dark:bg-black">
-      <div className="w-full max-w-sm rounded-3xl border border-black/[.08] bg-white p-10 shadow-sm dark:border-white/[.08] dark:bg-zinc-900">
+      <Card className="block w-full max-w-sm gap-0 rounded-3xl border border-black/[.08] bg-white p-10 shadow-sm ring-0 dark:border-white/[.08] dark:bg-zinc-900">
         <div className="flex flex-col items-center text-center">
           <Image
             src="/FolioQ-logo.png"
@@ -94,33 +101,29 @@ export default function SignupPage() {
         </div>
 
         <div className="mt-10 flex flex-col gap-5">
-          <input
+          <Input
             type="text"
             placeholder="Full name"
             value={fullName}
             onChange={(e) => setFullName(e.target.value)}
-            className="w-full rounded-2xl border border-black/[.08] bg-white px-5 py-3.5 text-sm text-black outline-none placeholder:text-zinc-400 focus:border-black/[.2] dark:border-white/[.145] dark:bg-zinc-900 dark:text-zinc-50 dark:focus:border-white/[.3]"
+            className={inputClassName}
           />
-          <input
+          <Input
             type="email"
             placeholder="you@university.edu"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            className="w-full rounded-2xl border border-black/[.08] bg-white px-5 py-3.5 text-sm text-black outline-none placeholder:text-zinc-400 focus:border-black/[.2] dark:border-white/[.145] dark:bg-zinc-900 dark:text-zinc-50 dark:focus:border-white/[.3]"
+            className={inputClassName}
           />
-          <input
-            type="password"
+          <PasswordInput
             placeholder="Password"
             value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            className="w-full rounded-2xl border border-black/[.08] bg-white px-5 py-3.5 text-sm text-black outline-none placeholder:text-zinc-400 focus:border-black/[.2] dark:border-white/[.145] dark:bg-zinc-900 dark:text-zinc-50 dark:focus:border-white/[.3]"
+            onChange={setPassword}
           />
-          <input
-            type="password"
+          <PasswordInput
             placeholder="Confirm password"
             value={confirmPassword}
-            onChange={(e) => setConfirmPassword(e.target.value)}
-            className="w-full rounded-2xl border border-black/[.08] bg-white px-5 py-3.5 text-sm text-black outline-none placeholder:text-zinc-400 focus:border-black/[.2] dark:border-white/[.145] dark:bg-zinc-900 dark:text-zinc-50 dark:focus:border-white/[.3]"
+            onChange={setConfirmPassword}
           />
         </div>
 
@@ -140,13 +143,13 @@ export default function SignupPage() {
           <p className="mt-4 text-sm text-red-600 dark:text-red-400">{error}</p>
         )}
 
-        <button
+        <Button
           onClick={handleSignup}
           disabled={loading || !agreedToTerms}
-          className="mt-7 w-full rounded-full bg-black px-5 py-3.5 text-sm font-medium text-white transition-colors hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-white dark:text-black dark:hover:bg-zinc-200"
+          className="mt-7 h-auto w-full rounded-full bg-black px-5 py-3.5 text-sm font-medium text-white hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-white dark:text-black dark:hover:bg-zinc-200"
         >
           {loading ? 'Creating…' : 'Sign up'}
-        </button>
+        </Button>
 
         <p className="mt-8 text-center text-sm text-zinc-500 dark:text-zinc-400">
           Already have an account?{' '}
@@ -157,7 +160,7 @@ export default function SignupPage() {
             Log in here
           </Link>
         </p>
-      </div>
+      </Card>
     </div>
   )
 }
