@@ -5,7 +5,7 @@ import { cache } from 'react'
 import { cookies } from 'next/headers'
 import { getSessionUser } from '@/lib/auth'
 import { isCurrency, type Money } from '@/lib/currency'
-import { getRate } from '@/lib/fx'
+import { getRate, type Provider } from '@/lib/fx'
 
 export const CURRENCY_COOKIE = 'fq_currency'
 
@@ -21,6 +21,8 @@ export interface MoneyState extends Money {
   asOf: string
   /** The currency the person asked for, which differs from `code` only when unavailable. */
   wanted: string
+  /** The site the rate came from. Null for US dollars and when unavailable. */
+  provider: Provider | null
 }
 
 /**
@@ -34,9 +36,20 @@ export const getMoney = cache(async (): Promise<MoneyState> => {
   const fromCookie = (await cookies()).get(CURRENCY_COOKIE)?.value
   const wanted = isCurrency(saved) ? saved : isCurrency(fromCookie) ? fromCookie : 'USD'
 
-  if (wanted === 'USD') return { code: 'USD', rate: 1, source: 'usd', asOf: '', wanted }
+  if (wanted === 'USD') {
+    return { code: 'USD', rate: 1, source: 'usd', asOf: '', wanted, provider: null }
+  }
 
   const found = await getRate(wanted)
-  if (!found) return { code: 'USD', rate: 1, source: 'unavailable', asOf: '', wanted }
-  return { code: wanted, rate: found.rate, source: found.source, asOf: found.asOf, wanted }
+  if (!found) {
+    return { code: 'USD', rate: 1, source: 'unavailable', asOf: '', wanted, provider: null }
+  }
+  return {
+    code: wanted,
+    rate: found.rate,
+    source: found.source,
+    asOf: found.asOf,
+    wanted,
+    provider: found.provider,
+  }
 })

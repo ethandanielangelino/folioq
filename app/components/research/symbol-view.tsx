@@ -1,6 +1,6 @@
 import Link from 'next/link'
 import { ChevronLeft } from 'lucide-react'
-import { Amount, CurrencyPicker, RateNote } from '@/app/components/money'
+import { Amount, RateNote } from '@/app/components/money'
 import Delta from '@/app/components/portfolio/delta'
 import { card } from '@/app/components/styles'
 import {
@@ -110,10 +110,7 @@ export default function SymbolView({
           {[symbol, profile?.exchange, profile?.industry].filter(Boolean).join(', ')}
         </p>
         {aside}
-        <div className="mt-5 flex flex-wrap items-center gap-x-4 gap-y-2">
-          <CurrencyPicker id="research-currency" />
-          <RateNote className="min-w-0 flex-1 basis-64 text-xs leading-5 text-zinc-500 dark:text-zinc-400" />
-        </div>
+        <RateNote className="mt-4 max-w-2xl text-xs leading-5 text-zinc-500 dark:text-zinc-400" />
       </header>
 
       <div className="mt-10 grid gap-6 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)]">

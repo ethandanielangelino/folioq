@@ -6,7 +6,7 @@ import { LiveRefresh } from '@/app/components/portfolio/live'
 import PortfolioOverview from '@/app/components/portfolio/portfolio-overview'
 import PortfolioTabs from '@/app/components/portfolio/tabs'
 import ThesisList from '@/app/components/portfolio/thesis-list'
-import { CurrencyPicker, MoneyProvider } from '@/app/components/money'
+import { MoneyProvider } from '@/app/components/money'
 import ThemeToggle from '@/app/components/theme-toggle'
 import { getSharedPortfolioView } from '@/lib/data'
 import { getMoney } from '@/lib/money'
@@ -47,7 +47,6 @@ export default async function SharedPortfolioPage({ params }: Props) {
             </span>
           </Link>
           <div className="flex items-center gap-2">
-            <CurrencyPicker id="share-currency" />
             <ThemeToggle />
             <span className="rounded-full bg-sky-tint px-3 py-1.5 text-xs font-medium text-black">
               Read-only view

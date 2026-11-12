@@ -1,6 +1,7 @@
 'use client'
 
 import { createContext, useContext, useTransition } from 'react'
+import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { ChevronDown } from 'lucide-react'
 import { setCurrency } from '@/app/actions/currency'
@@ -15,7 +16,7 @@ import {
 } from '@/lib/currency'
 import type { MoneyState } from '@/lib/money'
 
-const DEFAULT: MoneyState = { ...USD, source: 'usd', asOf: '', wanted: 'USD' }
+const DEFAULT: MoneyState = { ...USD, source: 'usd', asOf: '', wanted: 'USD', provider: null }
 const MoneyContext = createContext<MoneyState>(DEFAULT)
 
 /**
@@ -68,16 +69,27 @@ function when(state: MoneyState): string {
     : date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' })
 }
 
-/** One line saying what amounts are converted at, or nothing when they are in US dollars. */
-export function RateNote({ className = '' }: { className?: string }) {
+/**
+ * The disclaimer shown wherever amounts have been converted: prices are live
+ * in US dollars, the converted figures are approximate, and which site the
+ * exchange rate came from. Shows nothing when amounts are in US dollars.
+ */
+export function RateNote({
+  className = '',
+  pointToSettings = true,
+}: {
+  className?: string
+  /** Say where the currency can be changed. Off on the settings page itself. */
+  pointToSettings?: boolean
+}) {
   const state = useMoney()
   if (state.source === 'usd') return null
 
   if (state.source === 'unavailable') {
     return (
       <p className={className}>
-        Exchange rates for {state.wanted} can&apos;t be reached right now, so amounts are in US
-        dollars.
+        Exchange rates for {state.wanted} can&apos;t be reached right now, so amounts are shown in
+        US dollars, the currency prices are quoted in.
       </p>
     )
   }
@@ -85,11 +97,35 @@ export function RateNote({ className = '' }: { className?: string }) {
   const stamp = when(state)
   return (
     <p className={className}>
-      Amounts are in {state.code}, converted at today&apos;s rate: {describeRate(state)}
+      Prices are live in US dollars. Amounts in {state.code} are converted at {describeRate(state)}
       {state.source === 'live'
-        ? ` (live${stamp ? `, ${stamp}` : ''})`
-        : ` (European Central Bank rate${stamp ? ` for ${stamp}` : ''})`}
-      . Holdings are priced and recorded in US dollars.
+        ? `, a live rate${stamp ? ` as of ${stamp}` : ''}`
+        : `, the daily reference rate${stamp ? ` for ${stamp}` : ''}`}
+      {state.provider && (
+        <>
+          {' '}
+          from{' '}
+          <a
+            href={state.provider.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="underline underline-offset-2"
+          >
+            {state.provider.name}
+          </a>
+        </>
+      )}
+      , and may not reflect exactly what you would get on exchanging.
+      {pointToSettings && (
+        <>
+          {' '}
+          Change the currency in{' '}
+          <Link href="/account" className="underline underline-offset-2">
+            account settings
+          </Link>
+          .
+        </>
+      )}
     </p>
   )
 }

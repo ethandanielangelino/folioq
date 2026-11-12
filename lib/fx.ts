@@ -14,11 +14,25 @@ import { pickRate } from '@/lib/currency'
 
 type Table = Record<string, number>
 
+/** The site a rate came from, so pages can name it and link to it. */
+export interface Provider {
+  name: string
+  url: string
+}
+
+const FXRATES: Provider = { name: 'fxratesapi.com', url: 'https://fxratesapi.com' }
+const COINBASE: Provider = { name: 'Coinbase', url: 'https://www.coinbase.com/converter' }
+const ECB: Provider = {
+  name: 'the European Central Bank (via frankfurter.dev)',
+  url: 'https://frankfurter.dev',
+}
+
 export interface Rate {
   rate: number
   source: 'live' | 'reference'
   /** When the figure is from: an ISO timestamp for live, a date for reference. */
   asOf: string
+  provider: Provider
 }
 
 async function getJson(url: string, revalidateSeconds: number): Promise<unknown> {
@@ -44,19 +58,23 @@ function numbers(input: unknown): Table | null {
 }
 
 /** Refreshed every minute while anyone is looking. */
-async function liveTable(): Promise<{ rates: Table; asOf: string } | null> {
+async function liveTable(): Promise<{ rates: Table; asOf: string; provider: Provider } | null> {
   const first = (await getJson('https://api.fxratesapi.com/latest?base=USD', 60)) as {
     rates?: unknown
     date?: string
   } | null
   const fromFirst = numbers(first?.rates)
-  if (fromFirst) return { rates: fromFirst, asOf: first?.date ?? new Date().toISOString() }
+  if (fromFirst) {
+    return { rates: fromFirst, asOf: first?.date ?? new Date().toISOString(), provider: FXRATES }
+  }
 
   const second = (await getJson('https://api.coinbase.com/v2/exchange-rates?currency=USD', 60)) as {
     data?: { rates?: unknown }
   } | null
   const fromSecond = numbers(second?.data?.rates)
-  return fromSecond ? { rates: fromSecond, asOf: new Date().toISOString() } : null
+  return fromSecond
+    ? { rates: fromSecond, asOf: new Date().toISOString(), provider: COINBASE }
+    : null
 }
 
 /** Published once each working day, so an hour's cache loses nothing. */
@@ -71,7 +89,7 @@ async function referenceTable(): Promise<{ rates: Table; asOf: string } | null> 
 
 /** Units of `code` per US dollar right now, or null if no source can say. */
 export async function getRate(code: string): Promise<Rate | null> {
-  if (code === 'USD') return { rate: 1, source: 'reference', asOf: '' }
+  if (code === 'USD') return { rate: 1, source: 'reference', asOf: '', provider: ECB }
 
   const [live, reference] = await Promise.all([liveTable(), referenceTable()])
   const chosen = pickRate(live?.rates[code], reference?.rates[code])
@@ -80,5 +98,6 @@ export async function getRate(code: string): Promise<Rate | null> {
   return {
     ...chosen,
     asOf: (chosen.source === 'live' ? live?.asOf : reference?.asOf) ?? '',
+    provider: chosen.source === 'live' && live ? live.provider : ECB,
   }
 }

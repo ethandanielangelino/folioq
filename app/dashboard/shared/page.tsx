@@ -2,7 +2,7 @@ import type { Metadata } from 'next'
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { Eye, Pencil } from 'lucide-react'
-import { Amount } from '@/app/components/money'
+import { Amount, RateNote } from '@/app/components/money'
 import Delta from '@/app/components/portfolio/delta'
 import LiveSync from '@/app/components/portfolio/live-sync'
 import Sparkline from '@/app/components/portfolio/sparkline'
@@ -103,6 +103,9 @@ export default async function SharedPage() {
 
           <section className="mt-12">
             <h2 className="text-2xl text-black dark:text-zinc-50">Portfolios you can open</h2>
+            {accepted.length > 0 && (
+              <RateNote className="mt-2 max-w-2xl text-xs leading-5 text-zinc-500 dark:text-zinc-400" />
+            )}
             {accepted.length === 0 ? (
               <p className="mt-3 max-w-xl text-sm leading-6 text-zinc-600 dark:text-zinc-400">
                 Nothing yet. When you accept an invitation, the portfolio appears here and stays

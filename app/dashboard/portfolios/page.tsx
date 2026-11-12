@@ -2,7 +2,7 @@ import type { Metadata } from 'next'
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { ArrowUpRight } from 'lucide-react'
-import { Amount } from '@/app/components/money'
+import { Amount, RateNote } from '@/app/components/money'
 import Wiggle from '@/app/components/motion/wiggle'
 import Delta from '@/app/components/portfolio/delta'
 import Sparkline from '@/app/components/portfolio/sparkline'
@@ -67,6 +67,7 @@ export default async function PortfoliosPage() {
         </div>
         {cards.length > 0 && <PortfolioFormDialog triggerLabel="New portfolio" />}
       </div>
+      <RateNote className="mt-4 max-w-2xl text-xs leading-5 text-zinc-500 dark:text-zinc-400" />
 
       {cards.length > 1 && (
         <dl className={`${card} mt-8 grid divide-y divide-black/[.06] sm:grid-cols-3 sm:divide-x sm:divide-y-0 dark:divide-white/[.08]`}>

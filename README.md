@@ -122,10 +122,10 @@ Saving signs the account out on every device and sends the person to log in agai
 
 ## Display currency
 
-Everything is stored and calculated in US dollars, because that is what US-listed shares trade in. A person can choose another currency to *see* amounts in (top bar, or Account); each amount is then multiplied by the current rate as it is printed. Percentages and the database are untouched, and costs are still entered in dollars.
+Everything is stored and calculated in US dollars, because that is what US-listed shares trade in. A person can choose another currency to *see* amounts in, under Account settings (the only place it is set); each amount is then multiplied by the current rate as it is printed. Percentages and the database are untouched, and costs are still entered in dollars.
 
-- **Where the choice lives:** on the account (`user_metadata.currency`) so it follows the person between devices, and in a cookie so a visitor to a public link can choose too. No new tables.
-- **Rates** (`lib/fx.ts`), both free and keyless: a live feed (fxratesapi.com, then Coinbase's public rates) cached for a minute, and the European Central Bank's daily reference rate via Frankfurter. The live figure is used only when it is within 5% of the ECB's (`pickRate` in `lib/currency.ts`); otherwise, or if no live source answers, the ECB rate is used and the page says which it is. If nothing can be fetched, amounts stay in dollars and the page says so.
+- **Where the choice lives:** on the account (`user_metadata.currency`) so it follows the person between devices, and in a cookie so the same browser keeps it on public pages. No new tables.
+- **Rates** (`lib/fx.ts`), both free and keyless: a live feed (fxratesapi.com, then Coinbase's public rates) cached for a minute, and the European Central Bank's daily reference rate via Frankfurter. The live figure is used only when it is within 5% of the ECB's (`pickRate` in `lib/currency.ts`); otherwise, or if no live source answers, the ECB rate is used. Wherever amounts are converted, a note says prices are live in US dollars, that converted figures are approximate, and names and links the site the rate came from. If nothing can be fetched, amounts stay in dollars and the page says so.
 - **In components:** server components print `<Amount value={usd} />`; client components call `formatMoney(usd, useMoney())`. Pages without a `MoneyProvider` (the public marketing pages and their sample fund) show dollars.
 - The assistant is given figures in the same currency the page shows.
 

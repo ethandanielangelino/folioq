@@ -24,6 +24,7 @@ export default function SignupForm({ next }: { next: string }) {
   const [fullName, setFullName] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
   const [agreedToTerms, setAgreedToTerms] = useState(false)
   const [error, setError] = useState('')
   const [existing, setExisting] = useState(false)
@@ -35,8 +36,8 @@ export default function SignupForm({ next }: { next: string }) {
     setError('')
     setExisting(false)
 
-    if (!fullName.trim() || !email || !password) {
-      setError('Fill in your name, email, and a password.')
+    if (!fullName.trim() || !email || !password || !confirmPassword) {
+      setError('Fill in your name, email, and the password twice.')
       return
     }
     if (!isValidEmail(email)) {
@@ -46,6 +47,10 @@ export default function SignupForm({ next }: { next: string }) {
     const weak = passwordError(password)
     if (weak) {
       setError(weak)
+      return
+    }
+    if (password !== confirmPassword) {
+      setError('The two passwords don’t match. Type the same password in both boxes.')
       return
     }
     if (!agreedToTerms) {
@@ -162,6 +167,22 @@ export default function SignupForm({ next }: { next: string }) {
             autoComplete="new-password"
           />
           <PasswordChecklist password={password} />
+        </div>
+
+        <div className="flex flex-col gap-2">
+          <label htmlFor="signup-confirm" className={fieldLabel}>
+            Confirm password
+          </label>
+          <PasswordInput
+            id="signup-confirm"
+            name="confirm"
+            value={confirmPassword}
+            onChange={setConfirmPassword}
+            autoComplete="new-password"
+          />
+          {confirmPassword.length > 0 && confirmPassword !== password && (
+            <p className="text-xs text-zinc-500 dark:text-zinc-400">Doesn’t match yet.</p>
+          )}
         </div>
 
         <label className="flex items-start gap-2.5 text-sm text-zinc-600 dark:text-zinc-400">

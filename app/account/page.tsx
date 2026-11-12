@@ -81,7 +81,7 @@ export default async function AccountPage() {
 
       <Block
         title="Your share ID"
-        description="Give this to someone who wants to share a portfolio with you. It only lets them send you an invite, which you can accept or decline."
+        description="Give this to someone who wants to share a portfolio with you. It only lets them send you an invite, which you can accept or decline. It stays hidden until you press Show; Copy works either way."
       >
         {profile ? (
           <ShareIdCard code={profile.shareCode} />
@@ -96,15 +96,42 @@ export default async function AccountPage() {
 
       <Block
         title="Currency"
-        description="The currency amounts are shown in, everywhere in FolioQ. It follows your account to any device you sign in on."
+        description="Choose the currency every amount in FolioQ is shown in. It follows your account to any device you sign in on."
       >
         <CurrencyPicker id="account-currency" />
-        <RateNote className="mt-3 max-w-md text-xs leading-5 text-zinc-600 dark:text-zinc-400" />
-        <p className="mt-3 max-w-md text-xs leading-5 text-zinc-500 dark:text-zinc-400">
-          US-listed shares trade in US dollars, so prices and the costs you enter stay in dollars
-          underneath. Other currencies are a conversion at today&apos;s rate, refreshed every
-          minute. Percentages are unaffected.
-        </p>
+        <RateNote
+          pointToSettings={false}
+          className="mt-3 max-w-md text-xs leading-5 text-zinc-700 dark:text-zinc-300"
+        />
+        <div className="mt-4 max-w-md rounded-2xl border border-amber-deep/40 bg-amber-tint/25 px-4 py-3 text-xs leading-5 text-zinc-700 dark:bg-amber-deep/10 dark:text-zinc-300">
+          <p className="font-medium text-black dark:text-zinc-50">
+            Prices are live in US dollars only
+          </p>
+          <p className="mt-1">
+            US-listed shares trade in US dollars, so that is the currency prices arrive in and the
+            one you enter costs in. In any other currency, every amount (values, costs, gains,
+            and the day&apos;s rise or fall) is the dollar figure converted at the current
+            exchange rate. It may not reflect exactly what you would get on exchanging, and past
+            costs are converted at today&apos;s rate, not the rate on the day you bought.
+            Percentages are not affected.
+          </p>
+          <p className="mt-2">
+            Exchange rates come from{' '}
+            <a href="https://fxratesapi.com" target="_blank" rel="noopener noreferrer" className="underline underline-offset-2">
+              fxratesapi.com
+            </a>{' '}
+            (live, refreshed every minute), with{' '}
+            <a href="https://www.coinbase.com/converter" target="_blank" rel="noopener noreferrer" className="underline underline-offset-2">
+              Coinbase
+            </a>{' '}
+            as a backup. Each live rate is checked against the European Central Bank&apos;s daily
+            rate, taken from{' '}
+            <a href="https://frankfurter.dev" target="_blank" rel="noopener noreferrer" className="underline underline-offset-2">
+              frankfurter.dev
+            </a>
+            , which is used instead if the live rate is unavailable or looks wrong.
+          </p>
+        </div>
       </Block>
 
       <Block

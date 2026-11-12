@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
-import { Check, Copy } from 'lucide-react'
+import { Check, Copy, Eye, EyeOff } from 'lucide-react'
 import { changePassword } from '@/app/account/actions'
 import { signOut } from '@/app/actions/auth'
 import PasswordChecklist from '@/app/components/password-checklist'
@@ -211,34 +211,73 @@ export function PasswordForm({ mode, email }: { mode: PasswordMode; email: strin
   )
 }
 
-/** The account's share ID, with a button to copy it. */
+/**
+ * The account's share ID. Hidden until "Show" is pressed, so it isn't read
+ * off the screen by whoever is nearby; "Copy" works whether or not it is showing.
+ */
 export function ShareIdCard({ code }: { code: string }) {
   const toast = useToast()
+  const [shown, setShown] = useState(false)
   const [copied, setCopied] = useState(false)
+  const [error, setError] = useState('')
+
+  // Same shape as the real thing, with every character after "FQ-" covered.
+  const masked = code.replace(/^(FQ-)?(.*)$/, (_, prefix: string | undefined, rest: string) =>
+    (prefix ?? '') + rest.replace(/[^-]/g, '•')
+  )
 
   async function copy() {
+    setError('')
     try {
       await navigator.clipboard.writeText(code)
       setCopied(true)
       toast('Share ID copied')
+      setTimeout(() => setCopied(false), 2500)
     } catch {
-      // Clipboard blocked: the ID is on screen to copy by hand.
+      // The browser refused: show it so it can be copied by hand.
+      setShown(true)
+      setError('Couldn’t copy automatically. Select the ID and copy it.')
     }
   }
 
   return (
-    <div className="flex flex-wrap items-center gap-3">
-      <p className="rounded-2xl border border-mint-600/30 bg-mint-600/[.08] px-5 py-3 font-mono text-xl font-semibold tracking-wider text-black select-all dark:border-mint-400/30 dark:bg-mint-400/[.1] dark:text-zinc-50">
-        {code}
-      </p>
-      <button type="button" onClick={copy} className={`${outlineButton} gap-2`}>
-        {copied ? (
-          <Check className="h-4 w-4" aria-hidden="true" />
-        ) : (
-          <Copy className="h-4 w-4" aria-hidden="true" />
-        )}
-        {copied ? 'Copied' : 'Copy'}
-      </button>
+    <div>
+      <div className="flex flex-wrap items-center gap-3">
+        <p
+          aria-label={shown ? `Your share ID is ${code}` : 'Your share ID is hidden'}
+          className={`rounded-2xl border border-mint-600/30 bg-mint-600/[.08] px-5 py-3 font-mono text-xl font-semibold tracking-wider text-black dark:border-mint-400/30 dark:bg-mint-400/[.1] dark:text-zinc-50 ${
+            shown ? 'select-all' : 'select-none'
+          }`}
+        >
+          {shown ? code : masked}
+        </p>
+        <button
+          type="button"
+          onClick={() => setShown((value) => !value)}
+          aria-pressed={shown}
+          className={`${outlineButton} gap-2`}
+        >
+          {shown ? (
+            <EyeOff className="h-4 w-4" aria-hidden="true" />
+          ) : (
+            <Eye className="h-4 w-4" aria-hidden="true" />
+          )}
+          {shown ? 'Hide' : 'Show'}
+        </button>
+        <button type="button" onClick={copy} className={`${outlineButton} gap-2`}>
+          {copied ? (
+            <Check className="h-4 w-4" aria-hidden="true" />
+          ) : (
+            <Copy className="h-4 w-4" aria-hidden="true" />
+          )}
+          {copied ? 'Copied' : 'Copy'}
+        </button>
+      </div>
+      {error && (
+        <p role="alert" className={`mt-3 ${errorText}`}>
+          {error}
+        </p>
+      )}
     </div>
   )
 }
