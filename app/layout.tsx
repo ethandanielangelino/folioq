@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono, Playfair_Display } from "next/font/google";
+import { Geist, Geist_Mono, Newsreader } from "next/font/google";
+import MotionProvider from "@/app/components/motion/motion-provider";
+import { SessionScript, SessionSync } from "@/app/components/session";
 import { ThemeProvider } from "@/app/components/theme-provider";
 import "./globals.css";
 
@@ -13,9 +15,12 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
-const playfairDisplay = Playfair_Display({
+// The serif carries page titles and every written thesis.
+const newsreader = Newsreader({
   variable: "--font-serif",
   subsets: ["latin"],
+  style: ["normal", "italic"],
+  axes: ["opsz"],
 });
 
 export const metadata: Metadata = {
@@ -28,11 +33,13 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
     <html
       lang="en"
       suppressHydrationWarning
-      className={`${geistSans.variable} ${geistMono.variable} ${playfairDisplay.variable} h-full antialiased`}
+      className={`${geistSans.variable} ${geistMono.variable} ${newsreader.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col">
+        <SessionScript />
+        <SessionSync />
         <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
-          {children}
+          <MotionProvider>{children}</MotionProvider>
         </ThemeProvider>
       </body>
     </html>

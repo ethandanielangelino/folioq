@@ -4,6 +4,92 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/*
+  Brand palette. Ink and mint come from the logo; the light end of the scale
+  is a warm paper so pages read like a printed report rather than a terminal.
+  The app is written with Tailwind's zinc/black classes, so re-pointing those
+  two scales here retints every page at once.
+*/
+@theme {
+  --color-black: #0d1524;
+  --color-zinc-50: #f8f5ef;
+  --color-zinc-100: #f1ede5;
+  --color-zinc-200: #e3dfd6;
+  --color-zinc-300: #c8c6c1;
+  --color-zinc-400: #989da7;
+  --color-zinc-500: #656d7a;
+  --color-zinc-600: #4e5664;
+  --color-zinc-700: #39404d;
+  --color-zinc-800: #222936;
+  --color-zinc-900: #141b28;
+  --color-zinc-950: #0b111c;
+
+  /*
+    Mint marks what you can act on or what just changed. Never used for gains.
+    700 and 800 are the primary-action colour on light pages.
+  */
+  --color-mint-50: #eef8f5;
+  --color-mint-100: #dcf2ec;
+  --color-mint-200: #c6ebe2;
+  --color-mint-300: #93d8c7;
+  --color-mint-400: #5fc2ab;
+  --color-mint-500: #3aa88f;
+  --color-mint-600: #1f8a73;
+  --color-mint-700: #136b59;
+  --color-mint-800: #0d5546;
+  --color-mint-900: #0a4034;
+
+  /* Supporting tints for the illustration panels on public pages. */
+  --color-sky-tint: #d3e7f1;
+  --color-amber-tint: #f4d48d;
+  --color-amber-deep: #dd9226;
+
+  --animate-toast-in: toast-in 180ms ease-out;
+  --animate-panel-in: panel-in 160ms ease-out;
+  --animate-pulse-dot: pulse-dot 2.4s ease-in-out infinite;
+  --animate-menu-in: menu-in 140ms ease-out;
+
+  @keyframes toast-in {
+    from {
+      opacity: 0;
+      transform: translateY(8px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+  @keyframes panel-in {
+    from {
+      opacity: 0;
+      transform: translateY(4px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+  @keyframes menu-in {
+    from {
+      opacity: 0;
+      transform: translateY(-4px) scale(0.98);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
+  }
+  @keyframes pulse-dot {
+    0%,
+    100% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0.35;
+    }
+  }
+}
+
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
@@ -52,32 +138,38 @@ body {
   font-family: var(--font-geist-sans), Arial, Helvetica, sans-serif;
 }
 
+/*
+  Page and section titles are set in the serif at regular weight. This rule is
+  unlayered on purpose: it outranks Tailwind's weight utilities, so every h1
+  and h2 in the app matches without each one having to opt in. h3 and below
+  stay in the sans and take whatever weight their classes give them.
+*/
 h1,
-h2,
-h3 {
-  font-family: var(--font-serif), serif;
-  letter-spacing: 0.015em;
+h2 {
+  font-family: var(--font-serif), Georgia, serif;
+  font-weight: 400;
+  letter-spacing: -0.018em;
 }
 
 :root {
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
+  --background: #f8f5ef;
+  --foreground: #0d1524;
+  --card: #ffffff;
+  --card-foreground: #0d1524;
+  --popover: #ffffff;
+  --popover-foreground: #0d1524;
+  --primary: #136b59;
+  --primary-foreground: #ffffff;
+  --secondary: #f1ede5;
+  --secondary-foreground: #0d1524;
+  --muted: #f1ede5;
+  --muted-foreground: #656d7a;
+  --accent: #f1ede5;
+  --accent-foreground: #0d1524;
   --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
+  --border: #e3dfd6;
+  --input: #e3dfd6;
+  --ring: #3aa88f;
   --chart-1: oklch(0.87 0 0);
   --chart-2: oklch(0.556 0 0);
   --chart-3: oklch(0.439 0 0);
@@ -95,24 +187,24 @@ h3 {
 }
 
 .dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
+  --background: #0b111c;
+  --foreground: #f8f5ef;
+  --card: #141b28;
+  --card-foreground: #f8f5ef;
+  --popover: #141b28;
+  --popover-foreground: #f8f5ef;
+  --primary: #93d8c7;
+  --primary-foreground: #0d1524;
+  --secondary: #222936;
+  --secondary-foreground: #f8f5ef;
+  --muted: #222936;
+  --muted-foreground: #989da7;
+  --accent: #222936;
+  --accent-foreground: #f8f5ef;
   --destructive: oklch(0.704 0.191 22.216);
   --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
+  --ring: #5fc2ab;
   --chart-1: oklch(0.87 0 0);
   --chart-2: oklch(0.556 0 0);
   --chart-3: oklch(0.439 0 0);
@@ -137,5 +229,175 @@ h3 {
   }
   html {
     @apply font-sans;
+  }
+}
+/* Chart colors. One accent hue for the series that matters, gray for context. */
+:root {
+  --viz-series: #2a78d6;
+  --viz-context: #898781;
+  --viz-grid: #e3e6ec;
+  --viz-axis: #c3c8d2;
+  --viz-label: #646c7b;
+}
+
+.dark {
+  --viz-series: #3987e5;
+  --viz-context: #898781;
+  --viz-grid: #222a38;
+  --viz-axis: #343c4b;
+  --viz-label: #969dab;
+}
+
+/* One visible, on-brand focus style for anything that doesn't define its own. */
+/* Dialog panels take focus when they open; they shouldn't light up for it. */
+:where(a, button, summary, [role='tab'], [tabindex]):not([role='dialog']):focus-visible {
+  outline: 2px solid var(--color-mint-500);
+  outline-offset: 2px;
+}
+
+::selection {
+  background-color: color-mix(in oklab, var(--color-mint-400) 45%, transparent);
+}
+
+/* Buttons acknowledge a press. */
+button:not(:disabled):active {
+  transform: scale(0.98);
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  *,
+  ::before,
+  ::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+  button:not(:disabled):active {
+    transform: none;
+  }
+}
+
+/*
+  Signed-in / signed-out variants. A tiny script in the root layout sets
+  data-session on <html> before first paint, so the right variant shows with
+  no flash. This only decides what is *shown*; access is enforced in proxy.ts.
+*/
+.member-only {
+  display: none;
+}
+html[data-session='in'] .member-only {
+  display: contents;
+}
+.guest-only {
+  display: contents;
+}
+html[data-session='in'] .guest-only {
+  display: none;
+}
+
+/* The soft panel that product illustrations sit on. */
+.stage {
+  background:
+    radial-gradient(120% 90% at 0% 0%, #cfe9d9 0%, transparent 55%),
+    radial-gradient(110% 90% at 100% 0%, var(--color-sky-tint) 0%, transparent 60%),
+    linear-gradient(180deg, #dcf0ea 0%, #d9efe8 100%);
+}
+.dark .stage {
+  background:
+    radial-gradient(120% 90% at 0% 0%, #123a35 0%, transparent 55%),
+    radial-gradient(110% 90% at 100% 0%, #15324a 0%, transparent 60%),
+    linear-gradient(180deg, #0f2029 0%, #0e1c26 100%);
+}
+
+/* Concentric rings, fading out toward the edges. Echoes the ring of the logo. */
+.rings {
+  --ring-line: rgb(13 21 36 / 0.07);
+  background-image: repeating-radial-gradient(
+    circle at 50% 56%,
+    transparent 0 87px,
+    var(--ring-line) 87px 88px
+  );
+  mask-image: radial-gradient(circle at 50% 56%, black 0%, black 35%, transparent 78%);
+}
+.dark .rings,
+.rings-on-ink {
+  --ring-line: rgb(255 255 255 / 0.07);
+}
+
+/* Coloured mats behind the miniature windows. */
+.mat-mint {
+  background: linear-gradient(140deg, #136b59 0%, #3aa88f 45%, #93d8c7 100%);
+}
+.mat-sky {
+  background: linear-gradient(140deg, #1c5f86 0%, #4a9cc4 50%, #a9d6ea 100%);
+}
+.mat-amber {
+  background: linear-gradient(140deg, #b86a12 0%, var(--color-amber-deep) 45%, var(--color-amber-tint) 100%);
+}
+.mat-ink {
+  background: linear-gradient(140deg, #0d1524 0%, #1b2b40 55%, #2f5a63 100%);
+}
+
+/*
+  Theme switch. While the theme button's transition runs, the incoming theme
+  is revealed through a circle that grows from the button. Scoped to
+  .theme-switching so no other view transition is affected.
+*/
+html.theme-switching::view-transition-old(root),
+html.theme-switching::view-transition-new(root) {
+  animation: none;
+  mix-blend-mode: normal;
+}
+html.theme-switching::view-transition-new(root) {
+  animation: theme-reveal 620ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+@keyframes theme-reveal {
+  from {
+    clip-path: circle(0px at var(--theme-x, 50%) var(--theme-y, 50%));
+  }
+  to {
+    clip-path: circle(var(--theme-r, 150vmax) at var(--theme-x, 50%) var(--theme-y, 50%));
+  }
+}
+
+/*
+  Signed-in layout. The sidebar can be hidden on wide screens; the choice is
+  kept in localStorage and restored before first paint (see session.tsx).
+  The name in the top bar only shows when the sidebar isn't there to carry it.
+*/
+@media (min-width: 1024px) {
+  html[data-sidebar='closed'] .app-sidebar {
+    display: none;
+  }
+  html:not([data-sidebar='closed']) .app-topmark {
+    display: none;
+  }
+}
+
+/* The assistant's mark on the signed-in home page: the logo's ring turning slowly. */
+.qmark-ring {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: qmark-turn 16s linear infinite;
+}
+.qmark-glow {
+  animation: qmark-breathe 5s ease-in-out infinite alternate;
+}
+@keyframes qmark-turn {
+  to {
+    rotate: 360deg;
+  }
+}
+@keyframes qmark-breathe {
+  to {
+    opacity: 0.45;
+    scale: 1.15;
   }
 }

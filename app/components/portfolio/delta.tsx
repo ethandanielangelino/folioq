@@ -1,0 +1,46 @@
+import { ArrowDownRight, ArrowUpRight, Minus } from 'lucide-react'
+import { direction, formatSignedMoney, formatSignedPercent } from '@/lib/format'
+
+const tone = {
+  up: 'text-emerald-700 dark:text-emerald-400',
+  down: 'text-red-700 dark:text-red-400',
+  flat: 'text-zinc-500 dark:text-zinc-400',
+} as const
+
+const label = { up: 'Up', down: 'Down', flat: 'Unchanged' } as const
+
+/**
+ * A gain or loss: signed amount, optional percentage, and an arrow so the
+ * direction never depends on color alone.
+ */
+export default function Delta({
+  amount,
+  ratio,
+  className = '',
+  showIcon = true,
+}: {
+  amount: number | null
+  ratio?: number | null
+  className?: string
+  showIcon?: boolean
+}) {
+  if (amount === null) {
+    return <span className={`text-zinc-400 dark:text-zinc-500 ${className}`}>—</span>
+  }
+
+  const dir = direction(amount)
+  const Icon = dir === 'up' ? ArrowUpRight : dir === 'down' ? ArrowDownRight : Minus
+
+  return (
+    <span className={`inline-flex items-center gap-1 whitespace-nowrap ${tone[dir]} ${className}`}>
+      {showIcon && (
+        <>
+          <Icon className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+          <span className="sr-only">{label[dir]}</span>
+        </>
+      )}
+      <span>{formatSignedMoney(amount)}</span>
+      {ratio !== null && ratio !== undefined && <span>({formatSignedPercent(ratio)})</span>}
+    </span>
+  )
+}
