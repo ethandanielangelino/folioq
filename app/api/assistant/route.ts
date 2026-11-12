@@ -2,6 +2,7 @@ import { finalizeAnswer } from '@/lib/assistant-format'
 import { gatherSources } from '@/lib/assistant-sources'
 import { getMessages, getOwnedPortfolioView } from '@/lib/data'
 import { streamChatReply } from '@/lib/gemini'
+import { getMoney } from '@/lib/money'
 import { createClient } from '@/lib/supabase/server'
 
 // Streams the assistant's answer while it is being written. When the model
@@ -51,11 +52,13 @@ export async function POST(request: Request) {
   // The conversation belongs to the owner; people it is shared with don't get one.
   if (!view || view.portfolio.user_id !== user.id) return json('Portfolio not found.', 404)
 
-  const [history, sources] = await Promise.all([
+  const [history, sources, money] = await Promise.all([
     getMessages(supabase, view.portfolio.id),
     gatherSources(view),
+    getMoney(),
   ])
-  const reply = await streamChatReply(view, history, question, sources)
+  // Figures go to the assistant in the currency the page shows, so its answer matches it.
+  const reply = await streamChatReply(view, history, question, sources, money)
   if (!reply.ok) return json(reply.error, 503)
 
   const encoder = new TextEncoder()

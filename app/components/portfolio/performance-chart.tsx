@@ -1,5 +1,6 @@
 'use client'
 
+import { useMoney } from '@/app/components/money'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { card } from '@/app/components/styles'
 import {
@@ -60,6 +61,7 @@ const RANGES = [
 type RangeId = (typeof RANGES)[number]['id']
 
 export default function PerformanceChart({ points: allPoints }: { points: PerformancePoint[] }) {
+  const money = useMoney()
   const [range, setRange] = useState<RangeId>('ALL')
 
   // Days of history on record decide which ranges are worth offering.
@@ -237,7 +239,7 @@ export default function PerformanceChart({ points: allPoints }: { points: Perfor
               height={HEIGHT}
               viewBox={`0 0 ${width} ${HEIGHT}`}
               role="img"
-              aria-label={`Market value and cost basis from ${formatDate(points[0].date)} to ${formatDate(latest.date)}. Latest value ${formatMoney(latest.marketValue)}, cost basis ${formatMoney(latest.costBasis)}. Use the arrow keys to read each day.`}
+              aria-label={`Market value and cost basis from ${formatDate(points[0].date)} to ${formatDate(latest.date)}. Latest value ${formatMoney(latest.marketValue, money)}, cost basis ${formatMoney(latest.costBasis, money)}. Use the arrow keys to read each day.`}
               tabIndex={0}
               className="block max-w-full touch-pan-y rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-black/30 dark:focus-visible:ring-white/40"
               onPointerMove={(e) => setActive(nearestIndex(e.clientX, e.currentTarget))}
@@ -265,7 +267,7 @@ export default function PerformanceChart({ points: allPoints }: { points: Perfor
                     fill="var(--viz-label)"
                     style={{ fontVariantNumeric: 'tabular-nums' }}
                   >
-                    {formatMoneyCompact(tick)}
+                    {formatMoneyCompact(tick, money)}
                   </text>
                 </g>
               ))}
@@ -363,7 +365,7 @@ export default function PerformanceChart({ points: allPoints }: { points: Perfor
                       Value
                     </dt>
                     <dd className="font-semibold text-black dark:text-zinc-50">
-                      {formatMoney(shown.marketValue)}
+                      {formatMoney(shown.marketValue, money)}
                     </dd>
                   </div>
                   <div className="flex items-center justify-between gap-3">
@@ -372,13 +374,13 @@ export default function PerformanceChart({ points: allPoints }: { points: Perfor
                       Cost
                     </dt>
                     <dd className="font-semibold text-black dark:text-zinc-50">
-                      {formatMoney(shown.costBasis)}
+                      {formatMoney(shown.costBasis, money)}
                     </dd>
                   </div>
                   <div className="flex items-center justify-between gap-3 border-t border-black/[.06] pt-1.5 dark:border-white/[.1]">
                     <dt className="text-zinc-500 dark:text-zinc-400">Gain</dt>
                     <dd className="font-semibold text-black dark:text-zinc-50">
-                      {formatSignedMoney(shown.marketValue - shown.costBasis)}
+                      {formatSignedMoney(shown.marketValue - shown.costBasis, money)}
                     </dd>
                   </div>
                 </dl>
@@ -421,10 +423,10 @@ export default function PerformanceChart({ points: allPoints }: { points: Perfor
                 {[...points].reverse().map((p) => (
                   <tr key={p.date} className="text-zinc-700 dark:text-zinc-300">
                     <td className="px-4 py-2">{formatDate(p.date)}</td>
-                    <td className="px-4 py-2 text-right">{formatMoney(p.marketValue)}</td>
-                    <td className="px-4 py-2 text-right">{formatMoney(p.costBasis)}</td>
+                    <td className="px-4 py-2 text-right">{formatMoney(p.marketValue, money)}</td>
+                    <td className="px-4 py-2 text-right">{formatMoney(p.costBasis, money)}</td>
                     <td className="px-4 py-2 text-right">
-                      {formatSignedMoney(p.marketValue - p.costBasis)}
+                      {formatSignedMoney(p.marketValue - p.costBasis, money)}
                     </td>
                   </tr>
                 ))}

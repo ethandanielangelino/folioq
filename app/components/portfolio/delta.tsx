@@ -1,4 +1,7 @@
+'use client'
+
 import { ArrowDownRight, ArrowUpRight, Minus } from 'lucide-react'
+import { useMoney } from '@/app/components/money'
 import { direction, formatSignedMoney, formatSignedPercent } from '@/lib/format'
 
 const tone = {
@@ -24,6 +27,7 @@ export default function Delta({
   className?: string
   showIcon?: boolean
 }) {
+  const money = useMoney()
   if (amount === null) {
     return <span className={`text-zinc-400 dark:text-zinc-500 ${className}`}>—</span>
   }
@@ -39,7 +43,7 @@ export default function Delta({
           <span className="sr-only">{label[dir]}</span>
         </>
       )}
-      <span>{formatSignedMoney(amount)}</span>
+      <span>{formatSignedMoney(amount, money)}</span>
       {ratio !== null && ratio !== undefined && <span>({formatSignedPercent(ratio)})</span>}
     </span>
   )

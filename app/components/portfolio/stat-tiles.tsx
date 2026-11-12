@@ -1,7 +1,7 @@
+import { Amount, RateNote } from '@/app/components/money'
 import Delta from '@/app/components/portfolio/delta'
 import { Flash } from '@/app/components/portfolio/live'
 import { card } from '@/app/components/styles'
-import { formatMoney } from '@/lib/format'
 import type { PortfolioTotals } from '@/lib/portfolio'
 
 function Tile({
@@ -56,10 +56,12 @@ export default function StatTiles({
         <div className="border-b border-black/[.06] px-6 py-5 sm:border-b-0 dark:border-white/[.08]">
           <p className="text-sm text-zinc-500 dark:text-zinc-400">Market value</p>
           <p className="mt-1 text-4xl font-semibold tracking-tight text-black sm:text-5xl dark:text-zinc-50">
-            <Flash value={totals.marketValue}>{formatMoney(totals.marketValue)}</Flash>
+            <Flash value={totals.marketValue}>
+              <Amount value={totals.marketValue} />
+            </Flash>
           </p>
           <p className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">
-            Cost basis {formatMoney(totals.costBasis)}
+            Cost basis <Amount value={totals.costBasis} />
           </p>
         </div>
         <Tile label="Gain" hint="Current value against what the holdings cost">
@@ -69,6 +71,7 @@ export default function StatTiles({
           <Delta amount={totals.dayChange} ratio={totals.dayChangePct} />
         </Tile>
       </div>
+      <RateNote className="border-t border-black/[.06] px-6 py-2.5 text-xs leading-5 text-zinc-600 dark:border-white/[.08] dark:text-zinc-400" />
       {(notes.length > 0 || footer) && (
         <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2 border-t border-black/[.06] px-6 py-2.5 dark:border-white/[.08]">
           <p className="text-xs leading-5 text-zinc-600 dark:text-zinc-400">{notes.join(' ')}</p>

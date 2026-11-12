@@ -40,7 +40,7 @@ It is safe to run more than once. Until it has been run, creating a portfolio fa
 
 Then run `supabase/sharing.sql` the same way. It adds what sharing a portfolio with another account needs: a `profiles` table (each account's share ID and display name), a `portfolio_members` table (who a portfolio is shared with, as viewer or editor, and whether they accepted), the extra access rules for those people, and the functions the app calls. Nothing existing is dropped. Until it has been run the app works as before and says so wherever sharing with people would appear.
 
-In **Authentication → Sign In / Providers → Email** set the minimum password length to 8 and require lowercase, uppercase, digits, and symbols. The app enforces those rules itself, but setting them in Supabase too means they hold even for a request that doesn't come from the app.
+In **Authentication → Sign In / Providers → Email** set the minimum password length to 8, require lowercase, uppercase, digits, and symbols, and turn on **Require current password when updating**. The app enforces all of this itself, but setting it in Supabase too means it holds even for a request that doesn't come from the app. Supabase skips the current-password check in the same two cases the app does: an account that has no password yet, and a session that began from a reset email.
 
 ### 4. Run
 
@@ -119,6 +119,15 @@ Saving signs the account out on every device and sends the person to log in agai
 ### Password reset
 
 `/forgot-password` emails a reset link that returns to `/auth/callback?next=/account?reset=1`, where the person chooses a new password. For this to work, add `https://<your site>/**` (and `http://localhost:3000/**` for development) to **Authentication → URL Configuration → Redirect URLs** in Supabase.
+
+## Display currency
+
+Everything is stored and calculated in US dollars, because that is what US-listed shares trade in. A person can choose another currency to *see* amounts in (top bar, or Account); each amount is then multiplied by the current rate as it is printed. Percentages and the database are untouched, and costs are still entered in dollars.
+
+- **Where the choice lives:** on the account (`user_metadata.currency`) so it follows the person between devices, and in a cookie so a visitor to a public link can choose too. No new tables.
+- **Rates** (`lib/fx.ts`), both free and keyless: a live feed (fxratesapi.com, then Coinbase's public rates) cached for a minute, and the European Central Bank's daily reference rate via Frankfurter. The live figure is used only when it is within 5% of the ECB's (`pickRate` in `lib/currency.ts`); otherwise, or if no live source answers, the ECB rate is used and the page says which it is. If nothing can be fetched, amounts stay in dollars and the page says so.
+- **In components:** server components print `<Amount value={usd} />`; client components call `formatMoney(usd, useMoney())`. Pages without a `MoneyProvider` (the public marketing pages and their sample fund) show dollars.
+- The assistant is given figures in the same currency the page shows.
 
 ## Sharing a portfolio
 

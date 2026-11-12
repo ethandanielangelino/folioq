@@ -4,6 +4,7 @@ import { ArrowRight, Check, ChevronRight } from 'lucide-react'
 import AskBar from '@/app/components/app/ask-bar'
 import QMark from '@/app/components/app/q-mark'
 import RecordTrack, { type RecordPart } from '@/app/components/app/record-track'
+import { Amount, RateNote } from '@/app/components/money'
 import Wiggle from '@/app/components/motion/wiggle'
 import Delta from '@/app/components/portfolio/delta'
 import LiveSync from '@/app/components/portfolio/live-sync'
@@ -12,7 +13,6 @@ import { card, primaryButton } from '@/app/components/styles'
 import PortfolioFormDialog from '@/app/dashboard/portfolio-form-dialog'
 import { displayName, getSessionUser } from '@/lib/auth'
 import { getPortfolioCards, type PortfolioCard } from '@/lib/data'
-import { formatMoney } from '@/lib/format'
 import { getSharedWithMe, timeLeft } from '@/lib/sharing'
 import { createClient } from '@/lib/supabase/server'
 
@@ -221,7 +221,7 @@ export default async function DashboardHome({ searchParams }: Props) {
           {firstName ? `${firstName}, you answer for` : 'You answer for'}
         </p>
         <h1 className="mt-3 text-[3.25rem] leading-[1.05] text-black tabular-nums sm:text-7xl dark:text-zinc-50">
-          {formatMoney(total.value)}
+          <Amount value={total.value} />
         </h1>
         <p className="mt-3 flex flex-wrap items-baseline gap-x-2 gap-y-1 text-sm text-zinc-600 dark:text-zinc-400">
           <span>
@@ -236,6 +236,8 @@ export default async function DashboardHome({ searchParams }: Props) {
             </span>
           )}
         </p>
+
+        <RateNote className="mt-2 max-w-2xl text-xs leading-5 text-zinc-500 dark:text-zinc-400" />
 
         {cards.length > 1 && (
           <nav
@@ -349,7 +351,7 @@ export default async function DashboardHome({ searchParams }: Props) {
                           </h3>
                           <p className="mt-1 flex flex-wrap items-baseline gap-x-3 gap-y-1">
                             <span className="text-2xl font-semibold tracking-tight text-black tabular-nums dark:text-zinc-50">
-                              {formatMoney(c.totals.marketValue)}
+                              <Amount value={c.totals.marketValue} />
                             </span>
                             {c.holdingCount > 0 && (
                               <span className="text-sm tabular-nums">

@@ -2,6 +2,7 @@ import type { Metadata } from 'next'
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { ArrowUpRight } from 'lucide-react'
+import { Amount } from '@/app/components/money'
 import Wiggle from '@/app/components/motion/wiggle'
 import Delta from '@/app/components/portfolio/delta'
 import Sparkline from '@/app/components/portfolio/sparkline'
@@ -9,7 +10,6 @@ import { card } from '@/app/components/styles'
 import PortfolioFormDialog from '@/app/dashboard/portfolio-form-dialog'
 import { getSessionUser } from '@/lib/auth'
 import { getPortfolioCards } from '@/lib/data'
-import { formatMoney } from '@/lib/format'
 import { createClient } from '@/lib/supabase/server'
 
 const firstSteps = [
@@ -75,7 +75,7 @@ export default async function PortfoliosPage() {
               Across {cards.length} portfolios
             </dt>
             <dd className="mt-1 text-3xl font-semibold tracking-tight text-black tabular-nums dark:text-zinc-50">
-              {formatMoney(combined.marketValue)}
+              <Amount value={combined.marketValue} />
             </dd>
           </div>
           <div className="px-6 py-5">
@@ -166,7 +166,7 @@ export default async function PortfoliosPage() {
                     <div className="mt-auto pt-6">
                       <div className="flex items-end justify-between gap-4">
                         <p className="text-3xl font-semibold tracking-tight text-black tabular-nums dark:text-zinc-50">
-                          {formatMoney(totals.marketValue)}
+                          <Amount value={totals.marketValue} />
                         </p>
                         <Sparkline points={history} />
                       </div>

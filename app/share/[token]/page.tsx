@@ -6,8 +6,10 @@ import { LiveRefresh } from '@/app/components/portfolio/live'
 import PortfolioOverview from '@/app/components/portfolio/portfolio-overview'
 import PortfolioTabs from '@/app/components/portfolio/tabs'
 import ThesisList from '@/app/components/portfolio/thesis-list'
+import { CurrencyPicker, MoneyProvider } from '@/app/components/money'
 import ThemeToggle from '@/app/components/theme-toggle'
 import { getSharedPortfolioView } from '@/lib/data'
+import { getMoney } from '@/lib/money'
 
 type Props = { params: Promise<{ token: string }> }
 
@@ -24,8 +26,10 @@ export default async function SharedPortfolioPage({ params }: Props) {
   if (!view) notFound()
 
   const { portfolio, holdings } = view
+  const money = await getMoney()
 
   return (
+    <MoneyProvider value={money}>
     <div className="flex flex-1 flex-col bg-zinc-50 dark:bg-black">
       <div className="px-4 pt-3 sm:px-6 sm:pt-4">
         <header className="mx-auto flex w-full max-w-6xl items-center justify-between gap-4 rounded-full border border-black/[.07] bg-white/70 py-2 pr-3 pl-4 sm:pl-5 dark:border-white/[.08] dark:bg-zinc-900/60">
@@ -42,7 +46,8 @@ export default async function SharedPortfolioPage({ params }: Props) {
               FolioQ
             </span>
           </Link>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2">
+            <CurrencyPicker id="share-currency" />
             <ThemeToggle />
             <span className="rounded-full bg-sky-tint px-3 py-1.5 text-xs font-medium text-black">
               Read-only view
@@ -101,5 +106,6 @@ export default async function SharedPortfolioPage({ params }: Props) {
         Shared with FolioQ. Figures are for information only and are not investment advice.
       </footer>
     </div>
+    </MoneyProvider>
   )
 }

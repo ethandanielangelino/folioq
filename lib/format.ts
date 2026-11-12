@@ -1,16 +1,4 @@
-const usd = new Intl.NumberFormat('en-US', {
-  style: 'currency',
-  currency: 'USD',
-  minimumFractionDigits: 2,
-  maximumFractionDigits: 2,
-})
-
-const usdCompact = new Intl.NumberFormat('en-US', {
-  style: 'currency',
-  currency: 'USD',
-  notation: 'compact',
-  maximumFractionDigits: 1,
-})
+import { USD, money, moneyCompact, moneySigned, type Money } from '@/lib/currency'
 
 const percent = new Intl.NumberFormat('en-US', {
   style: 'percent',
@@ -23,21 +11,20 @@ const sharesFormat = new Intl.NumberFormat('en-US', { maximumFractionDigits: 6 }
 /** Typographic minus so negative numbers align and read cleanly. */
 const MINUS = '−'
 
-export function formatMoney(value: number): string {
-  // Avoid "-$0.00" for tiny negative rounding leftovers.
-  const rounded = Math.round(value * 100) / 100
-  return usd.format(rounded === 0 ? 0 : rounded).replace('-', MINUS)
+// Amounts are stored in US dollars. Passing a display currency converts at
+// its rate; leaving it out shows US dollars. See lib/currency.ts.
+
+export function formatMoney(value: number, m: Money = USD): string {
+  return money(value, m)
 }
 
-export function formatMoneyCompact(value: number): string {
-  return usdCompact.format(value).replace('-', MINUS)
+export function formatMoneyCompact(value: number, m: Money = USD): string {
+  return moneyCompact(value, m)
 }
 
 /** "+$1,204.10" / "−$88.00" / "$0.00" */
-export function formatSignedMoney(value: number): string {
-  const rounded = Math.round(value * 100) / 100
-  if (rounded === 0) return usd.format(0)
-  return (rounded > 0 ? '+' : MINUS) + usd.format(Math.abs(rounded))
+export function formatSignedMoney(value: number, m: Money = USD): string {
+  return moneySigned(value, m)
 }
 
 /** Takes a ratio: 0.1234 -> "12.34%" */

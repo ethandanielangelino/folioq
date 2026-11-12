@@ -2,6 +2,7 @@ import type { Metadata } from 'next'
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { Eye, Pencil } from 'lucide-react'
+import { Amount } from '@/app/components/money'
 import Delta from '@/app/components/portfolio/delta'
 import LiveSync from '@/app/components/portfolio/live-sync'
 import Sparkline from '@/app/components/portfolio/sparkline'
@@ -9,7 +10,7 @@ import { card } from '@/app/components/styles'
 import { InviteButtons, LeaveButton } from '@/app/dashboard/shared/invite-actions'
 import { getSessionUser } from '@/lib/auth'
 import { getPortfolioCards } from '@/lib/data'
-import { formatDate, formatMoney } from '@/lib/format'
+import { formatDate } from '@/lib/format'
 import { getSharedWithMe, timeLeft, type MemberRole } from '@/lib/sharing'
 import { createClient } from '@/lib/supabase/server'
 
@@ -134,7 +135,7 @@ export default async function SharedPage() {
                         <div className="mt-5 flex items-end justify-between gap-4">
                           <div>
                             <p className="text-3xl font-semibold tracking-tight text-black tabular-nums dark:text-zinc-50">
-                              {formatMoney(numbers.totals.marketValue)}
+                              <Amount value={numbers.totals.marketValue} />
                             </p>
                             <p className="mt-1 text-sm tabular-nums">
                               <Delta amount={numbers.totals.dayChange} ratio={numbers.totals.dayChangePct} />

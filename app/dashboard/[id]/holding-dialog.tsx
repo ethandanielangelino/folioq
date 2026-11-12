@@ -1,5 +1,6 @@
 'use client'
 
+import { useMoney } from '@/app/components/money'
 import { useId, useRef, useState, useTransition } from 'react'
 import {
   addHolding,
@@ -61,6 +62,7 @@ export default function HoldingDialog({
   const [matches, setMatches] = useState<SymbolMatch[]>([])
   const [error, setError] = useState('')
   const [costHint, setCostHint] = useState('')
+  const money = useMoney()
   const [confirmingDelete, setConfirmingDelete] = useState(false)
   const [pending, startTransition] = useTransition()
   const [fetchingPrice, startPriceLookup] = useTransition()
@@ -242,7 +244,7 @@ export default function HoldingDialog({
               </div>
               <div className="flex flex-col gap-2">
                 <label htmlFor={`${uid}-cost`} className={fieldLabel}>
-                  Average cost per share
+                  Average cost per share (US$)
                 </label>
                 <input
                   id={`${uid}-cost`}
@@ -261,7 +263,10 @@ export default function HoldingDialog({
             </div>
             <div className="-mt-3 flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-xs">
               <span id={`${uid}-cost-hint`} className="text-zinc-500 dark:text-zinc-400">
-                {costHint || 'Leave the cost blank if you don’t know it; gain is then left out.'}
+                {costHint ||
+                  (money.code === 'USD'
+                    ? 'Leave the cost blank if you don’t know it; gain is then left out.'
+                    : `Enter it in US dollars, the currency these shares trade in, even though amounts are shown in ${money.code}. Leave it blank if you don’t know it.`)}
               </span>
               <button
                 type="button"

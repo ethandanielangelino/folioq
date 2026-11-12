@@ -1,5 +1,6 @@
 import { card } from '@/app/components/styles'
-import { formatMoney, formatPercent } from '@/lib/format'
+import { Amount } from '@/app/components/money'
+import { formatPercent } from '@/lib/format'
 
 export interface AllocationRow {
   label: string
@@ -56,7 +57,7 @@ export default function AllocationBars({
                   {row.label}
                 </span>
                 <span className="shrink-0 tabular-nums text-zinc-500 dark:text-zinc-400">
-                  {formatMoney(row.marketValue)}
+                  <Amount value={row.marketValue} />
                   <span className="ml-2 font-medium text-black dark:text-zinc-50">
                     {formatPercent(row.weight)}
                   </span>

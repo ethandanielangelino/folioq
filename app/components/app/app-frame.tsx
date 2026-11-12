@@ -7,6 +7,7 @@ import { usePathname } from 'next/navigation'
 import { Dialog } from '@base-ui/react/dialog'
 import { Briefcase, LayoutGrid, PanelLeft, Search, UserRound, Users, X } from 'lucide-react'
 import AccountMenu from '@/app/components/account-menu'
+import { CurrencyPicker } from '@/app/components/money'
 import ThemeToggle from '@/app/components/theme-toggle'
 
 export interface FramePortfolio {
@@ -235,6 +236,7 @@ export default function AppFrame({
                 className="h-9 w-48 rounded-full border border-black/[.08] bg-white/70 pr-4 pl-9 text-sm text-black transition-[width,border-color] outline-none placeholder:text-zinc-400 focus-visible:w-64 focus-visible:border-mint-600 dark:border-white/[.12] dark:bg-zinc-900/70 dark:text-zinc-50 dark:focus-visible:border-mint-400"
               />
             </form>
+            <CurrencyPicker id="app-currency" />
             <ThemeToggle />
           </div>
         </header>

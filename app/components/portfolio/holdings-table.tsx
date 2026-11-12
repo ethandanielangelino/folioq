@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import Link from 'next/link'
 import { ArrowDown, ArrowUp } from 'lucide-react'
+import { useMoney } from '@/app/components/money'
 import Delta from '@/app/components/portfolio/delta'
 import { Flash } from '@/app/components/portfolio/live'
 import { goToTab } from '@/app/components/portfolio/tabs'
@@ -23,7 +24,8 @@ const columns: { key: SortKey; label: string }[] = [
   { key: 'gain', label: 'Gain' },
 ]
 
-const td = 'px-4 py-4 text-right align-top first:pl-6 first:text-left last:pr-6'
+// Tight side padding: amounts in other currencies carry a code and need the room.
+const td = 'px-2.5 py-4 text-right align-top first:pl-6 first:text-left last:pr-6'
 const dash = <span className="text-zinc-400 dark:text-zinc-500">—</span>
 
 function sortHoldings(holdings: Holding[], sort: Sort): Holding[] {
@@ -55,6 +57,7 @@ export default function HoldingsTable({
   thesisTab?: string
 }) {
   const [sort, setSort] = useState<Sort>({ key: 'marketValue', descending: true })
+  const money = useMoney()
   const rows = sortHoldings(holdings, sort)
 
   function toggle(key: SortKey) {
@@ -90,7 +93,7 @@ export default function HoldingsTable({
                       key={column.key}
                       scope="col"
                       aria-sort={active ? (sort.descending ? 'descending' : 'ascending') : 'none'}
-                      className="px-4 py-2 text-right first:pl-6 first:text-left"
+                      className="px-2.5 py-2 text-right first:pl-6 first:text-left"
                     >
                       <button
                         type="button"
@@ -110,7 +113,7 @@ export default function HoldingsTable({
                     </th>
                   )
                 })}
-                <th scope="col" className="px-4 py-2 pr-6">
+                <th scope="col" className="px-2.5 py-2 pr-6">
                   <span className="sr-only">Thesis and actions</span>
                 </th>
               </tr>
@@ -141,17 +144,17 @@ export default function HoldingsTable({
                     {formatShares(h.quantity)}
                   </td>
                   <td className={`${td} text-zinc-700 dark:text-zinc-300`}>
-                    {h.costBasis === null ? dash : formatMoney(h.costBasis)}
+                    {h.costBasis === null ? dash : formatMoney(h.costBasis, money)}
                   </td>
                   <td className={`${td} text-zinc-700 dark:text-zinc-300`}>
                     {h.price === null ? (
                       dash
                     ) : (
-                      <Flash value={h.price}>{formatMoney(h.price)}</Flash>
+                      <Flash value={h.price}>{formatMoney(h.price, money)}</Flash>
                     )}
                   </td>
                   <td className={`${td} font-medium text-black dark:text-zinc-50`}>
-                    <Flash value={h.marketValue}>{formatMoney(h.marketValue)}</Flash>
+                    <Flash value={h.marketValue}>{formatMoney(h.marketValue, money)}</Flash>
                   </td>
                   <td className={td}>
                     <Delta amount={h.dayChange} showIcon={false} />

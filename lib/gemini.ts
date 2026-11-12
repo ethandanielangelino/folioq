@@ -2,6 +2,7 @@
 
 import { splitSources } from '@/lib/assistant-format'
 import { describeSources, type PromptSource } from '@/lib/assistant-sources'
+import { USD, describeRate, type Money } from '@/lib/currency'
 import type { Holding, PortfolioView } from '@/lib/data'
 import type { CompanyProfile, NewsItem, Quote } from '@/lib/finnhub'
 import {
@@ -224,18 +225,18 @@ How to write:
 - Follow with the supporting points: one or two short paragraphs, or a list of up to five bullets, each starting with "- ". Use a numbered list only for a ranking by size.
 - Use a Markdown table only when comparing three or more holdings on the same measures.
 - Put ticker symbols in bold (**MSFT**) and nothing else. No headings, no italics, no emoji, no exclamation marks.
-- Copy figures exactly as they appear in the data, with their $ and % signs. Do not recalculate them.
+- Copy figures exactly as they appear in the data, with their currency symbol or code and their % signs. Do not recalculate them or convert them to another currency.
 - Measured, plain, professional English. Under 180 words unless asked for more.`
 
-function describeHolding(h: Holding): string {
+function describeHolding(h: Holding, money: Money): string {
   const parts = [
     `${h.ticker}${h.name ? ` (${h.name}${h.industry ? `, ${h.industry}` : ''})` : ''}:`,
     `${formatShares(h.quantity)} shares,`,
     `weight ${formatPercent(h.weight)},`,
-    `value ${formatMoney(h.marketValue)},`,
-    h.costBasis !== null ? `average cost ${formatMoney(h.costBasis)},` : 'no cost recorded,',
+    `value ${formatMoney(h.marketValue, money)},`,
+    h.costBasis !== null ? `average cost ${formatMoney(h.costBasis, money)},` : 'no cost recorded,',
     h.gain !== null
-      ? `gain ${formatSignedMoney(h.gain)}${h.gainPct !== null ? ` (${formatSignedPercent(h.gainPct)})` : ''},`
+      ? `gain ${formatSignedMoney(h.gain, money)}${h.gainPct !== null ? ` (${formatSignedPercent(h.gainPct)})` : ''},`
       : '',
     `opened ${h.openedAt}.`,
   ].filter(Boolean)
@@ -252,23 +253,25 @@ function describeHolding(h: Holding): string {
   return lines.join('\n')
 }
 
-export function describePortfolio(view: PortfolioView): string {
+export function describePortfolio(view: PortfolioView, money: Money = USD): string {
   const { portfolio, holdings, sectors, totals } = view
   const lines = [
     `Portfolio: ${portfolio.name}`,
     `Purpose (the owner's own words): ${portfolio.mandate?.trim() || 'not stated'}`,
     '',
-    'Totals (USD):',
-    `- Market value: ${formatMoney(totals.marketValue)}`,
-    `- Cost basis: ${formatMoney(totals.costBasis)}`,
-    `- Gain: ${formatSignedMoney(totals.gain)}${totals.gainPct !== null ? ` (${formatSignedPercent(totals.gainPct)})` : ''}`,
-    `- Change today: ${formatSignedMoney(totals.dayChange)}${totals.dayChangePct !== null ? ` (${formatSignedPercent(totals.dayChangePct)})` : ''}`,
+    money.code === 'USD'
+      ? 'Totals (US dollars):'
+      : `All amounts below are in ${money.code}, converted from US dollars at today's rate (${describeRate(money)}). The owner sees the same figures. Totals:`,
+    `- Market value: ${formatMoney(totals.marketValue, money)}`,
+    `- Cost basis: ${formatMoney(totals.costBasis, money)}`,
+    `- Gain: ${formatSignedMoney(totals.gain, money)}${totals.gainPct !== null ? ` (${formatSignedPercent(totals.gainPct)})` : ''}`,
+    `- Change today: ${formatSignedMoney(totals.dayChange, money)}${totals.dayChangePct !== null ? ` (${formatSignedPercent(totals.dayChangePct)})` : ''}`,
   ]
   if (totals.unpriced.length) lines.push(`- No live price for: ${totals.unpriced.join(', ')} (carried at cost)`)
   if (totals.uncosted.length) lines.push(`- No cost recorded for: ${totals.uncosted.join(', ')} (left out of gain)`)
 
   lines.push('', holdings.length ? 'Holdings, largest first:' : 'Holdings: none yet.')
-  for (const h of holdings) lines.push(describeHolding(h))
+  for (const h of holdings) lines.push(describeHolding(h, money))
 
   if (sectors.length) {
     lines.push('', 'Sector weights:')
@@ -319,7 +322,8 @@ export async function streamChatReply(
   view: PortfolioView,
   history: MessageRow[],
   question: string,
-  sources: PromptSource[]
+  sources: PromptSource[],
+  money: Money = USD
 ): Promise<ChatStream> {
   const key = process.env.GEMINI_API_KEY
   if (!key) return { ok: false, error: 'AI features are not configured (GEMINI_API_KEY is missing).' }
@@ -337,7 +341,7 @@ export async function streamChatReply(
     systemInstruction: {
       parts: [
         {
-          text: `${CHAT_SYSTEM}\n\n--- Portfolio data (live as of this message) ---\n${describePortfolio(view)}\n\n--- Outside sources you may cite ---\n${describeSources(sources)}`,
+          text: `${CHAT_SYSTEM}\n\n--- Portfolio data (live as of this message) ---\n${describePortfolio(view, money)}\n\n--- Outside sources you may cite ---\n${describeSources(sources)}`,
         },
       ],
     },

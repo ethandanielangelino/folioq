@@ -1,5 +1,6 @@
 import Link from 'next/link'
 import { ChevronLeft } from 'lucide-react'
+import { Amount, CurrencyPicker, RateNote } from '@/app/components/money'
 import Delta from '@/app/components/portfolio/delta'
 import { card } from '@/app/components/styles'
 import {
@@ -11,7 +12,7 @@ import {
   type NewsItem,
   type Quote,
 } from '@/lib/finnhub'
-import { formatDate, formatMoney, formatMoneyCompact } from '@/lib/format'
+import { formatDate } from '@/lib/format'
 
 export function parseSymbol(raw: string): string | null {
   try {
@@ -109,6 +110,10 @@ export default function SymbolView({
           {[symbol, profile?.exchange, profile?.industry].filter(Boolean).join(', ')}
         </p>
         {aside}
+        <div className="mt-5 flex flex-wrap items-center gap-x-4 gap-y-2">
+          <CurrencyPicker id="research-currency" />
+          <RateNote className="min-w-0 flex-1 basis-64 text-xs leading-5 text-zinc-500 dark:text-zinc-400" />
+        </div>
       </header>
 
       <div className="mt-10 grid gap-6 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)]">
@@ -117,7 +122,7 @@ export default function SymbolView({
           {quote ? (
             <>
               <p className="text-5xl font-semibold tracking-tight text-black sm:text-6xl dark:text-zinc-50">
-                {formatMoney(quote.price)}
+                <Amount value={quote.price} />
               </p>
               <p className="mt-3 text-base">
                 <Delta amount={quote.change} ratio={quote.changePercent} />
@@ -126,11 +131,15 @@ export default function SymbolView({
                 </span>
               </p>
               <dl className="mt-6 divide-y divide-black/[.06] border-t border-black/[.06] dark:divide-white/[.08] dark:border-white/[.08]">
-                <Fact label="Open">{formatMoney(quote.open)}</Fact>
-                <Fact label="Day range">
-                  {formatMoney(quote.low)} to {formatMoney(quote.high)}
+                <Fact label="Open">
+                  <Amount value={quote.open} />
                 </Fact>
-                <Fact label="Previous close">{formatMoney(quote.previousClose)}</Fact>
+                <Fact label="Day range">
+                  <Amount value={quote.low} /> to <Amount value={quote.high} />
+                </Fact>
+                <Fact label="Previous close">
+                  <Amount value={quote.previousClose} />
+                </Fact>
               </dl>
               <p className="mt-4 text-xs text-zinc-500 dark:text-zinc-400">
                 Last trade {timeInNewYork(quote.timestamp)} New York time.
@@ -155,8 +164,18 @@ export default function SymbolView({
               {profile.industry && <Fact label="Industry">{profile.industry}</Fact>}
               {profile.marketCap !== null && (
                 <Fact label="Market value">
-                  {formatMoneyCompact(profile.marketCap * 1_000_000)}
-                  {profile.currency && profile.currency !== 'USD' ? ` (${profile.currency})` : ''}
+                  {/* Reported in the company's own currency: converted only when that is US dollars. */}
+                  {!profile.currency || profile.currency === 'USD' ? (
+                    <Amount value={profile.marketCap * 1_000_000} compact />
+                  ) : /^[A-Z]{3}$/.test(profile.currency) ? (
+                    <Amount
+                      value={profile.marketCap * 1_000_000}
+                      compact
+                      in={{ code: profile.currency, rate: 1 }}
+                    />
+                  ) : (
+                    `${Math.round(profile.marketCap).toLocaleString('en-US')}M ${profile.currency}`
+                  )}
                 </Fact>
               )}
               {profile.exchange && <Fact label="Exchange">{profile.exchange}</Fact>}

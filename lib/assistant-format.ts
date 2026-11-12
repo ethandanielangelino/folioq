@@ -113,7 +113,8 @@ export function finalizeAnswer(raw: string, available: AssistantSource[]): strin
   })
 
   const market = available.find((s) => s.kind === 'market')
-  const quotesFigures = /\$\s?\d|\d\s?%/.test(body)
+  // A currency symbol or code followed by a number, or a percentage.
+  const quotesFigures = /(?:[$€£¥₱₹₩₺₪]|\b[A-Z]{3}[\s\u00a0])\s?\d|\d\s?%/.test(body)
   if (market && quotesFigures && !order.includes(market.n)) order.push(market.n)
 
   const renumbered = new Map(order.map((n, index) => [n, index + 1]))

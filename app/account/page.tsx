@@ -6,6 +6,7 @@ import {
   SignOutButton,
   type PasswordMode,
 } from '@/app/account/account-forms'
+import { CurrencyPicker, RateNote } from '@/app/components/money'
 import { card } from '@/app/components/styles'
 import { displayName, getSessionUser, hasPassword } from '@/lib/auth'
 import { formatDate } from '@/lib/format'
@@ -91,6 +92,19 @@ export default async function AccountPage() {
             editor, then reload this page.
           </p>
         )}
+      </Block>
+
+      <Block
+        title="Currency"
+        description="The currency amounts are shown in, everywhere in FolioQ. It follows your account to any device you sign in on."
+      >
+        <CurrencyPicker id="account-currency" />
+        <RateNote className="mt-3 max-w-md text-xs leading-5 text-zinc-600 dark:text-zinc-400" />
+        <p className="mt-3 max-w-md text-xs leading-5 text-zinc-500 dark:text-zinc-400">
+          US-listed shares trade in US dollars, so prices and the costs you enter stay in dollars
+          underneath. Other currencies are a conversion at today&apos;s rate, refreshed every
+          minute. Percentages are unaffected.
+        </p>
       </Block>
 
       <Block

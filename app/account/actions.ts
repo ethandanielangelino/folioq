@@ -1,5 +1,6 @@
 'use server'
 
+import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 import { createClient as createPlainClient } from '@supabase/supabase-js'
 import { hasPassword } from '@/lib/auth'
@@ -16,6 +17,10 @@ import type { ActionResult } from '@/lib/types'
  * - arrived through a reset email in the last few minutes: nothing more
  * - has never had a password (signed up with Google): nothing more
  * - otherwise: the current password, checked here before anything changes
+ *
+ * Supabase has a matching setting, "Require current password when updating".
+ * With it on, Supabase applies the same three rules itself, so the current
+ * password is passed along to it as well. This works with the setting on or off.
  */
 export async function changePassword(formData: FormData): Promise<ActionResult> {
   const supabase = await createClient()
@@ -37,7 +42,8 @@ export async function changePassword(formData: FormData): Promise<ActionResult> 
   if (next !== confirm) return { ok: false, error: 'The two new passwords don’t match.' }
 
   const recovering = await inRecovery(user.id)
-  if (!recovering && hasPassword(user)) {
+  const mustProveCurrent = !recovering && hasPassword(user)
+  if (mustProveCurrent) {
     if (!current) return { ok: false, error: 'Enter your current password.' }
     if (current === next) {
       return { ok: false, error: 'The new password is the same as the current one.' }
@@ -60,18 +66,30 @@ export async function changePassword(formData: FormData): Promise<ActionResult> 
 
   const { error } = await supabase.auth.updateUser({
     password: next,
+    ...(mustProveCurrent ? { current_password: current } : {}),
     // Remembered so an account that began with Google is asked for its
     // current password from now on.
     data: { has_password: true },
   })
   if (error) {
-    return {
-      ok: false,
-      error:
-        error.code === 'same_password'
-          ? 'The new password is the same as the current one.'
-          : error.message || 'Could not save the password. Try again.',
+    const code = String(error.code ?? '')
+    if (code === 'same_password') {
+      return { ok: false, error: 'The new password is the same as the current one.' }
     }
+    if (code === 'current_password_mismatch') {
+      return { ok: false, error: 'That isn’t your current password.' }
+    }
+    if (code === 'current_password_required' || /current password/i.test(error.message ?? '')) {
+      // Supabase says this account has a password and this isn't a reset
+      // session, whatever this app believed (a reset link used a while ago,
+      // or a password set before the app kept track). Believe Supabase:
+      // record it, drop the reset pass, and show the form with the extra field.
+      await supabase.auth.updateUser({ data: { has_password: true } })
+      await clearRecovery()
+      revalidatePath('/account')
+      return { ok: false, error: 'Enter your current password to change it.' }
+    }
+    return { ok: false, error: error.message || 'Could not save the password. Try again.' }
   }
 
   await clearRecovery()

@@ -44,6 +44,7 @@ const terms = [
     title: 'Prices and other market data',
     body: [
       'Prices, company details, and news come from Finnhub. They may be delayed, incomplete, unavailable, or wrong. Values, gains, and weights are calculated from those prices and from the numbers you entered, so an error in either carries through.',
+      'You can choose the currency amounts are shown in. US-listed shares trade in US dollars, so FolioQ records and calculates in dollars and converts for display at the current exchange rate. That makes a converted figure an indication, not what you would receive on exchanging, and it applies today’s rate to costs you paid in the past.',
       'Do not rely on FolioQ as the official record of an account. Your broker’s statements are the record.',
     ],
   },
@@ -107,7 +108,7 @@ const stored = [
   {
     term: 'In your browser',
     detail:
-      'A cookie that keeps you signed in, and your light or dark mode choice. FolioQ sets no advertising or tracking cookies.',
+      'A cookie that keeps you signed in, a cookie for your choice of currency, and your light or dark mode choice. FolioQ sets no advertising or tracking cookies.',
   },
 ]
 
@@ -125,6 +126,11 @@ const providers = [
     term: 'Google Gemini',
     detail:
       'Writes thesis drafts and assistant answers. When you ask for either, it is sent that portfolio’s description, holdings, and theses, and your question. It is not sent your name or email.',
+  },
+  {
+    term: 'Exchange-rate services',
+    detail:
+      'When you choose a currency other than US dollars, FolioQ fetches rates from fxratesapi.com or Coinbase, and the European Central Bank’s daily rate through Frankfurter. They are asked only for the rates; nothing about you or your portfolios is sent.',
   },
   {
     term: 'Vercel',
