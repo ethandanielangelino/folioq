@@ -2,7 +2,9 @@
 // Every function returns null (or an empty list) instead of throwing, so a
 // market-data hiccup degrades the page rather than breaking it.
 
+import { fresh } from '@/lib/fresh'
 import type { PriceQuote } from '@/lib/portfolio'
+import { FINNHUB, type PriceSource } from '@/lib/price-sources'
 
 const BASE_URL = 'https://finnhub.io/api/v1'
 
@@ -27,7 +29,8 @@ async function finnhub<T>(
   try {
     const res = await fetch(url, {
       headers: { 'X-Finnhub-Token': key },
-      next: { revalidate: revalidateSeconds },
+      // 0 means live: not cached by Next (see lib/fresh.ts for why).
+      ...(revalidateSeconds > 0 ? { next: { revalidate: revalidateSeconds } } : { cache: 'no-store' as const }),
       signal: AbortSignal.timeout(8000),
     })
     if (!res.ok) return { status: 'error' }
@@ -56,6 +59,8 @@ export interface Quote extends PriceQuote {
   previousClose: number
   /** Unix seconds of the last trade */
   timestamp: number
+  /** Where the price came from. Absent for US dollars held as cash, which need no price. */
+  source?: PriceSource
 }
 
 export type QuoteLookup =
@@ -65,8 +70,20 @@ export type QuoteLookup =
   /** Finnhub could not be reached, or the request was rate limited. */
   | { status: 'unavailable' }
 
+/**
+ * How long a share price is reused before Finnhub is asked again: fresher than
+ * the page's one-minute refresh, and well inside Finnhub's 60-a-minute limit
+ * even with several holdings and viewers.
+ */
+const QUOTE_SECONDS = 45
+
 export async function lookupQuote(symbol: string): Promise<QuoteLookup> {
-  const result = await finnhub<RawQuote>('/quote', { symbol }, 60)
+  const result = await fresh(
+    `finnhub:quote:${symbol}`,
+    QUOTE_SECONDS,
+    () => finnhub<RawQuote>('/quote', { symbol }, 0),
+    (answer) => answer.status === 'ok'
+  )
   if (result.status === 'error') return { status: 'unavailable' }
 
   const raw = result.data
@@ -83,6 +100,7 @@ export async function lookupQuote(symbol: string): Promise<QuoteLookup> {
       open: raw.o,
       previousClose: raw.pc,
       timestamp: raw.t,
+      source: FINNHUB,
     },
   }
 }
@@ -175,6 +193,24 @@ export async function searchSymbols(query: string, limit = 10): Promise<SymbolMa
     .filter((r) => SYMBOL_PATTERN.test(r.symbol))
     .slice(0, limit)
     .map((r) => ({ symbol: r.symbol, description: r.description, type: r.type }))
+}
+
+/**
+ * What a ticker is, from its exchange listing: Finnhub's security type
+ * ("Common Stock", "ETP", "REIT", ...) and its listed name. Null if the
+ * listing couldn't be read; cached for a day, as listings rarely change.
+ */
+export async function getListing(symbol: string): Promise<{ type: string; description: string } | null> {
+  const result = await finnhub<RawSearch>('/search', { q: symbol, exchange: 'US' }, 60 * 60 * 24)
+  const match = result.status === 'ok' ? (result.data.result ?? []).find((r) => r.symbol === symbol) : undefined
+  if (match) return { type: match.type ?? '', description: match.description ?? '' }
+  // The search can be rate limited. A company profile (funds have none, and
+  // the page has usually fetched it already) still says it is a company.
+  const profile = await getProfile(symbol)
+  if (profile?.industry) {
+    return { type: profile.industry === 'Real Estate' ? 'REIT' : 'Common Stock', description: profile.name }
+  }
+  return null
 }
 
 export interface NewsItem {

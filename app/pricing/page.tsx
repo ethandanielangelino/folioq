@@ -13,7 +13,7 @@ export const metadata: Metadata = {
 const included = [
   'As many portfolios as you need',
   'A written, versioned thesis for every holding',
-  'Live prices for US-listed stocks and ETFs',
+  'Live prices for US-listed stocks and funds, crypto, and gold and silver, plus cash in 30 currencies',
   'Values, gains, and allocation worked out for you',
   'Closing prices saved every market day for the value chart',
   'A read-only share link for each portfolio',
@@ -31,7 +31,7 @@ const questions = [
   },
   {
     q: 'Are there limits?',
-    a: 'Prices and AI answers come from outside providers with their own rate limits. A very large portfolio may occasionally show a holding at cost until the next refresh, and the AI may ask you to try again in a minute. FolioQ covers US-listed stocks and ETFs, in US dollars.',
+    a: 'Prices and AI answers come from outside providers with their own rate limits. A very large portfolio may occasionally show a holding at cost until the next refresh, and the AI may ask you to try again in a minute. FolioQ covers US-listed stocks and funds, crypto, gold and silver, and cash.',
   },
   {
     q: 'Will there be paid plans?',

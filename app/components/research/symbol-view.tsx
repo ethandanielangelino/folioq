@@ -139,7 +139,11 @@ export default function SymbolView({
                 </Fact>
               </dl>
               <p className="mt-4 text-xs text-zinc-500 dark:text-zinc-400">
-                Last trade {timeInNewYork(quote.timestamp)} New York time.
+                Last trade {timeInNewYork(quote.timestamp)} New York time. Price from{' '}
+                <a href="https://finnhub.io" target="_blank" rel="noopener noreferrer" className="underline underline-offset-2">
+                  Finnhub
+                </a>
+                , in US dollars.
               </p>
             </>
           ) : (

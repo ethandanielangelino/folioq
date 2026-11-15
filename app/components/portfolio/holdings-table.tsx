@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { Fragment, useState } from 'react'
 import Link from 'next/link'
 import { ArrowDown, ArrowUp } from 'lucide-react'
 import { useMoney } from '@/app/components/money'
@@ -10,13 +10,16 @@ import { goToTab } from '@/app/components/portfolio/tabs'
 import { card } from '@/app/components/styles'
 import type { Holding } from '@/lib/data'
 import { formatMoney, formatPercent, formatShares } from '@/lib/format'
+import { assetLabel, kindOf, priceKey, unitName } from '@/lib/assets'
+import { historyFor } from '@/lib/history'
+import HoldingHistory, { Expand, HistoryToggle, type HistoryContext } from '@/app/components/portfolio/holding-history'
 
 type SortKey = 'ticker' | 'quantity' | 'costBasis' | 'price' | 'marketValue' | 'dayChange' | 'gain'
 type Sort = { key: SortKey; descending: boolean }
 
 const columns: { key: SortKey; label: string }[] = [
   { key: 'ticker', label: 'Holding' },
-  { key: 'quantity', label: 'Shares' },
+  { key: 'quantity', label: 'Quantity' },
   { key: 'costBasis', label: 'Avg cost' },
   { key: 'price', label: 'Price' },
   { key: 'marketValue', label: 'Value' },
@@ -47,8 +50,11 @@ export default function HoldingsTable({
   actions,
   thesisTab,
   researchBase = '/research',
+  history,
 }: {
   holdings: Holding[]
+  /** Each holding's history, opened from its row. Not shown on public share links. */
+  history?: HistoryContext
   /** Where ticker links lead: the public research pages, or the ones inside the app. */
   researchBase?: string
   /** Per-holding controls for the owner, keyed by holding id. */
@@ -57,6 +63,17 @@ export default function HoldingsTable({
   thesisTab?: string
 }) {
   const [sort, setSort] = useState<Sort>({ key: 'marketValue', descending: true })
+  const [openHistory, setOpenHistory] = useState<Set<string>>(new Set())
+  const showHistory = history !== undefined && (history.available || history.canEdit)
+
+  function toggleHistory(id: string) {
+    setOpenHistory((current) => {
+      const next = new Set(current)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
   const money = useMoney()
   const rows = sortHoldings(holdings, sort)
 
@@ -80,9 +97,12 @@ export default function HoldingsTable({
           Nothing held right now.
         </p>
       ) : (
-        // `relative` keeps visually-hidden labels inside this scroller.
-        <div className="relative overflow-x-auto">
-          <table className="w-full min-w-[820px] text-sm tabular-nums">
+        <>
+        {/* Wide screens: a sortable table. */}
+        {/* `relative` keeps visually-hidden labels inside this scroller. */}
+        <div className="relative hidden overflow-x-auto md:block">
+          {/* Each holding is its own row group, so its history opens right under it. */}
+          <table className="w-full min-w-[820px] text-sm tabular-nums [&>tbody+tbody]:border-t [&>tbody+tbody]:border-black/[.06] dark:[&>tbody+tbody]:border-white/[.08]">
             <thead>
               <tr className="border-b border-black/[.06] dark:border-white/[.08]">
                 {columns.map((column) => {
@@ -118,19 +138,27 @@ export default function HoldingsTable({
                 </th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-black/[.06] dark:divide-white/[.08]">
-              {rows.map((h) => (
-                <tr
-                  key={h.id}
-                  className="transition-colors hover:bg-black/[.015] dark:hover:bg-white/[.02]"
-                >
+            {rows.map((h) => {
+              const entries = showHistory && history.available ? historyFor(history.entries, priceKey(h.ticker, h.assetClass)) : []
+              const open = openHistory.has(h.id)
+              return (
+              <Fragment key={h.id}>
+              <tbody>
+                <tr className="transition-colors hover:bg-black/[.015] dark:hover:bg-white/[.02]">
                   <th scope="row" className={`${td} font-normal`}>
-                    <Link
-                      href={`${researchBase}/${encodeURIComponent(h.ticker)}`}
-                      className="font-semibold text-black underline-offset-4 hover:underline dark:text-zinc-50"
-                    >
-                      {h.ticker}
-                    </Link>
+                    {/* Only listed tickers have a research page. */}
+                    {kindOf(h.assetClass) === 'listed' ? (
+                      <Link
+                        href={`${researchBase}/${encodeURIComponent(h.ticker)}`}
+                        className="font-semibold text-black underline-offset-4 hover:underline dark:text-zinc-50"
+                      >
+                        {h.ticker}
+                      </Link>
+                    ) : (
+                      <span className="font-semibold text-black dark:text-zinc-50">{h.ticker}</span>
+                    )}
+                    {' '}
+                    <AssetPill holding={h} />
                     {h.name && (
                       <span className="mt-0.5 block max-w-[13rem] truncate text-xs text-zinc-500 dark:text-zinc-400">
                         {h.name}
@@ -139,31 +167,54 @@ export default function HoldingsTable({
                     <span className="mt-0.5 block text-xs text-zinc-500 dark:text-zinc-400">
                       {formatPercent(h.weight)} of portfolio
                     </span>
+                    {showHistory && (
+                      <HistoryToggle
+                        open={open}
+                        count={history.available ? entries.length : null}
+                        onClick={() => toggleHistory(h.id)}
+                        controls={`history-${h.id}`}
+                        label={h.ticker}
+                      />
+                    )}
                   </th>
                   <td className={`${td} text-zinc-700 dark:text-zinc-300`}>
                     {formatShares(h.quantity)}
+                    {/* Say what the number counts when it isn't shares. */}
+                    {kindOf(h.assetClass) === 'cash' ? (
+                      <span className="block text-xs text-zinc-500 dark:text-zinc-400">{h.ticker}</span>
+                    ) : kindOf(h.assetClass) !== 'listed' ? (
+                      <span className="block text-xs text-zinc-500 dark:text-zinc-400">
+                        {kindOf(h.assetClass) === 'metal' ? 'oz' : unitName(h.assetClass, h.quantity)}
+                      </span>
+                    ) : null}
                   </td>
                   <td className={`${td} text-zinc-700 dark:text-zinc-300`}>
                     {h.costBasis === null ? dash : formatMoney(h.costBasis, money)}
                   </td>
                   <td className={`${td} text-zinc-700 dark:text-zinc-300`}>
-                    {h.price === null ? (
+                    {h.price === null || kindOf(h.assetClass) === 'cash' ? (
                       dash
                     ) : (
                       <Flash value={h.price}>{formatMoney(h.price, money)}</Flash>
                     )}
+                    <PriceCredit holding={h} stacked className="mt-0.5 block text-xs" />
                   </td>
                   <td className={`${td} font-medium text-black dark:text-zinc-50`}>
                     <Flash value={h.marketValue}>{formatMoney(h.marketValue, money)}</Flash>
                   </td>
                   <td className={td}>
                     <Delta amount={h.dayChange} showIcon={false} />
+                    {/* Crypto never closes, so its "today" is the last 24 hours. */}
+                    {h.assetClass === 'crypto' && h.dayChange !== null && (
+                      <span className="block text-xs text-zinc-500 dark:text-zinc-400">24h</span>
+                    )}
                   </td>
                   <td className={td}>
-                    <Delta amount={h.gain} ratio={h.gainPct} showIcon={false} />
+                    <Delta amount={h.gain} ratio={h.gainPct} showIcon={false} stacked />
                   </td>
                   <td className={`${td} whitespace-nowrap`}>
-                    <span className="inline-flex items-center justify-end gap-3">
+                    {/* The thesis above the trade buttons, so the row fits without scrolling sideways. */}
+                    <span className="inline-flex flex-col items-end gap-2">
                       {thesisTab && (
                         <button
                           type="button"
@@ -182,15 +233,200 @@ export default function HoldingsTable({
                           {h.thesis ? `Thesis v${h.thesis.version}` : 'No thesis'}
                         </button>
                       )}
-                      {actions?.[h.id]}
+                      {actions?.[h.id] && <span className="inline-flex items-center gap-2">{actions[h.id]}</span>}
                     </span>
                   </td>
                 </tr>
-              ))}
-            </tbody>
+                {showHistory && (
+                  <tr>
+                    <td colSpan={columns.length + 1} className="p-0">
+                      <Expand open={open} id={`history-${h.id}`}>
+                        <div className="mx-6 mb-5 rounded-2xl bg-zinc-50 px-5 py-4 dark:bg-white/[.03]">
+                          <HoldingHistory entries={entries} context={history} asset={h} />
+                        </div>
+                      </Expand>
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+              </Fragment>
+              )
+            })}
           </table>
         </div>
+
+        {/* Phones: one card per holding, with its actions in reach rather than off the edge of a table. */}
+        <ul className="divide-y divide-black/[.06] border-t border-black/[.06] md:hidden dark:divide-white/[.08] dark:border-white/[.08]">
+          {rows.map((h) => {
+            const entries = showHistory && history.available ? historyFor(history.entries, priceKey(h.ticker, h.assetClass)) : []
+            const open = openHistory.has(`card-${h.id}`)
+            return (
+              <li key={h.id} data-testid="holding-card">
+                <div className="px-5 py-4">
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="min-w-0">
+                      <p className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                        {kindOf(h.assetClass) === 'listed' ? (
+                          <Link
+                            href={`${researchBase}/${encodeURIComponent(h.ticker)}`}
+                            className="font-semibold text-black underline-offset-4 hover:underline dark:text-zinc-50"
+                          >
+                            {h.ticker}
+                          </Link>
+                        ) : (
+                          <span className="font-semibold text-black dark:text-zinc-50">{h.ticker}</span>
+                        )}
+                        {' '}
+                        <AssetPill holding={h} inline />
+                      </p>
+                      {h.name && <p className="mt-0.5 truncate text-xs text-zinc-500 dark:text-zinc-400">{h.name}</p>}
+                    </div>
+                    <div className="shrink-0 text-right tabular-nums">
+                      <p className="font-semibold text-black dark:text-zinc-50">
+                        <Flash value={h.marketValue}>{formatMoney(h.marketValue, money)}</Flash>
+                      </p>
+                      <p className="text-xs">
+                        <Delta amount={h.gain} ratio={h.gainPct} showIcon={false} />
+                      </p>
+                    </div>
+                  </div>
+                  <p className="mt-2 flex flex-wrap justify-between gap-x-4 gap-y-1 text-xs text-zinc-500 tabular-nums dark:text-zinc-400">
+                    <span>
+                      {formatShares(h.quantity)} {kindOf(h.assetClass) === 'metal' ? 'oz' : unitName(h.assetClass, h.quantity)}
+                      {h.price !== null && ` at ${formatMoney(h.price, money)}`}
+                      {h.costBasis !== null && `, cost ${formatMoney(h.costBasis, money)}`}
+                    </span>
+                    <span>
+                      Today <Delta amount={h.dayChange} showIcon={false} />
+                      {h.assetClass === 'crypto' && h.dayChange !== null && ' (24h)'}
+                    </span>
+                  </p>
+                  {h.priceSource && (
+                    <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+                      {kindOf(h.assetClass) === 'cash' ? '' : 'Price: '}
+                      <PriceCredit holding={h} />
+                    </p>
+                  )}
+                  <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+                    {showHistory ? (
+                      <HistoryToggle
+                        open={open}
+                        count={history.available ? entries.length : null}
+                        onClick={() => toggleHistory(`card-${h.id}`)}
+                        controls={`history-card-${h.id}`}
+                        label={h.ticker}
+                      />
+                    ) : (
+                      <span />
+                    )}
+                    <span className="inline-flex flex-wrap items-center justify-end gap-2">
+                      {thesisTab && (
+                        <button
+                          type="button"
+                          onClick={() => goToTab(thesisTab, `thesis-${h.id}`)}
+                          className="rounded-full bg-black/[.05] px-2.5 py-1 text-xs font-medium text-zinc-700 dark:bg-white/[.08] dark:text-zinc-200"
+                        >
+                          {h.thesis ? `Thesis v${h.thesis.version}` : 'No thesis'}
+                        </button>
+                      )}
+                      {actions?.[h.id]}
+                    </span>
+                  </div>
+                </div>
+                {showHistory && (
+                  <Expand open={open} id={`history-card-${h.id}`}>
+                    <div className="mx-4 mb-4 rounded-2xl bg-zinc-50 px-4 py-4 dark:bg-white/[.03]">
+                      <HoldingHistory entries={entries} context={history} asset={h} />
+                    </div>
+                  </Expand>
+                )}
+              </li>
+            )
+          })}
+        </ul>
+        </>
       )}
     </section>
+  )
+}
+
+/**
+ * Where a holding's price came from, linked to it: the exchange and pair when
+ * it is quoted directly in the display currency, or the US-dollar source
+ * (marked "in US$" when the figure shown is converted). For cash in another
+ * currency, the site its exchange rate came from.
+ */
+function PriceCredit({
+  holding,
+  className = '',
+  stacked = false,
+}: {
+  holding: Holding
+  className?: string
+  /** Name on one line, market or "in US$" on the next: for the table's narrow column. */
+  stacked?: boolean
+}) {
+  const money = useMoney()
+  const source = holding.priceSource
+  if (!source) return null
+  const cash = kindOf(holding.assetClass) === 'cash'
+  const converted = money.code !== 'USD'
+  const [first, second] = source.saved
+    ? ['Last saved price', null]
+    : cash
+      ? [`Rate from ${source.name}`, null]
+      : source.pair
+        ? [source.name, source.pair]
+        : converted
+          ? [source.name, 'in US$']
+          : [source.name, null]
+  const label = stacked ? (
+    <>
+      <span className="block whitespace-nowrap">{first}</span>
+      {second && <span className="block whitespace-nowrap">{second}</span>}
+    </>
+  ) : second ? (
+    `${first}, ${second}`
+  ) : (
+    first
+  )
+  const title = source.saved
+    ? 'No source answered just now, so this is the last price FolioQ saved.'
+    : cash
+      ? `Valued at the exchange rate from ${source.name}.`
+      : source.pair
+        ? `Quoted directly in ${money.code} on ${source.name}'s ${source.pair} market.`
+        : converted
+          ? `${source.name}'s US-dollar price, converted to ${money.code}.`
+          : `Price from ${source.name}.`
+  const style = `text-zinc-500 dark:text-zinc-400 ${className}`
+  if (!source.url) {
+    return (
+      <span className={style} title={title}>
+        {label}
+      </span>
+    )
+  }
+  const external = source.url.startsWith('http')
+  return (
+    <a
+      href={source.url}
+      title={title}
+      {...(external ? { target: '_blank', rel: 'noopener noreferrer' } : {})}
+      className={`${style} underline-offset-2 hover:text-zinc-700 hover:underline dark:hover:text-zinc-200`}
+    >
+      {label}
+    </a>
+  )
+}
+
+/** The label every holding carries, so each one says what it is: Stock, Bond fund, Crypto, Precious metal... */
+function AssetPill({ holding, inline = false }: { holding: Holding; inline?: boolean }) {
+  return (
+    <span
+      className={`${inline ? '' : 'ml-2 '}inline-block rounded-full bg-black/[.05] px-2 py-0.5 whitespace-nowrap text-[0.7rem] font-medium text-zinc-600 dark:bg-white/[.08] dark:text-zinc-300`}
+    >
+      {assetLabel(holding.assetClass, holding.industry !== null)}
+    </span>
   )
 }

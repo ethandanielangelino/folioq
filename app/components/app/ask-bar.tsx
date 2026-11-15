@@ -56,7 +56,7 @@ export default function AskBar({
           type="submit"
           disabled={!question.trim()}
           aria-label="Ask"
-          className="absolute top-1/2 right-1.5 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full bg-mint-300 text-black transition-colors hover:bg-mint-200 disabled:opacity-40"
+          className="absolute inset-y-0 right-1.5 my-auto flex h-10 w-10 items-center justify-center rounded-full bg-mint-300 text-black transition-colors hover:bg-mint-200 disabled:opacity-40"
         >
           <ArrowUp className="h-4 w-4" strokeWidth={2.5} aria-hidden="true" />
         </button>

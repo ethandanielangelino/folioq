@@ -1,6 +1,7 @@
 'use client'
 
-import { useCallback, useRef, useSyncExternalStore } from 'react'
+import { useCallback, useId, useRef, useSyncExternalStore } from 'react'
+import { motion } from 'motion/react'
 
 export interface TabSpec {
   id: string
@@ -63,6 +64,7 @@ export default function PortfolioTabs({ tabs, label }: { tabs: TabSpec[]; label:
   )
   const active = tabs.some((t) => t.id === hash) ? hash : tabs[0].id
   const listRef = useRef<HTMLDivElement>(null)
+  const underlineId = `tab-underline-${useId()}`
 
   const select = useCallback((id: string) => goToTab(id), [])
 
@@ -119,12 +121,15 @@ export default function PortfolioTabs({ tabs, label }: { tabs: TabSpec[]; label:
                     {tab.badge}
                   </span>
                 )}
-                <span
-                  aria-hidden="true"
-                  className={`absolute inset-x-3 -bottom-px h-0.5 rounded-full bg-mint-500 transition-opacity ${
-                    selected ? 'opacity-100' : 'opacity-0'
-                  }`}
-                />
+                {/* One underline, which slides to whichever tab is chosen. */}
+                {selected && (
+                  <motion.span
+                    layoutId={underlineId}
+                    aria-hidden="true"
+                    transition={{ type: 'spring', stiffness: 520, damping: 42, mass: 0.6 }}
+                    className="absolute inset-x-3 -bottom-px h-0.5 rounded-full bg-mint-500"
+                  />
+                )}
               </button>
             )
           })}

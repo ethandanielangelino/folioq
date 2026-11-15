@@ -93,8 +93,8 @@ export default async function SharedPortfolioPage({ params }: Props) {
               {
                 id: 'theses',
                 label: 'Theses',
-                badge: `${holdings.filter((h) => h.thesis).length} of ${holdings.length}`,
-                content: <ThesisList holdings={holdings} />,
+                badge: `${holdings.filter((h) => h.thesis).length} of ${holdings.filter((h) => h.assetClass !== 'cash').length}`,
+                content: <ThesisList holdings={holdings.filter((h) => h.assetClass !== 'cash')} />,
               },
             ]}
           />

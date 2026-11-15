@@ -5,6 +5,8 @@ import Markdown, { type Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { ArrowUpRight } from 'lucide-react'
 import { splitSources, type AssistantSource } from '@/lib/assistant-format'
+import { splitAction } from '@/lib/chat-actions'
+import ChatActionCard from '@/app/dashboard/[id]/chat-action'
 
 /**
  * One assistant answer, typeset: paragraphs, lists, tables, and bold from the
@@ -83,12 +85,14 @@ function components(sources: AssistantSource[]): Components {
   }
 }
 
-function AssistantMessage({ content }: { content: string }) {
+function AssistantMessage({ content, live = false }: { content: string; live?: boolean }) {
   const { body, sources } = splitSources(content)
+  // A change the assistant set up for the owner to confirm, shown as a form under its text.
+  const { text: answer, action } = splitAction(body)
   const numbers = new Set(sources.map((s) => s.n))
   // "[2]" becomes a link the renderer above turns into a numbered chip.
   // The no-break space keeps a chip from wrapping onto a line by itself.
-  const text = body.replace(/ ?\[(\d+)\]/g, (whole, digits: string) =>
+  const text = answer.replace(/ ?\[(\d+)\]/g, (whole, digits: string) =>
     numbers.has(Number(digits)) ? `\u00a0[${digits}](${SOURCE_HREF}${digits})` : whole
   )
 
@@ -99,6 +103,14 @@ function AssistantMessage({ content }: { content: string }) {
           {text}
         </Markdown>
       </div>
+
+      {/* The form appears once the answer is saved, so nothing typed into it is lost when the page refreshes. */}
+      {action &&
+        (live ? (
+          <p className="mt-3 text-xs text-zinc-500 dark:text-zinc-400">Setting up the form…</p>
+        ) : (
+          <ChatActionCard action={action} />
+        ))}
 
       {sources.length > 0 && (
         <div className="mt-4 border-t border-black/[.07] pt-3 dark:border-white/[.1]">

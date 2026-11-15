@@ -40,6 +40,12 @@ It is safe to run more than once. Until it has been run, creating a portfolio fa
 
 Then run `supabase/sharing.sql` the same way. It adds what sharing a portfolio with another account needs: a `profiles` table (each account's share ID and display name), a `portfolio_members` table (who a portfolio is shared with, as viewer or editor, and whether they accepted), the extra access rules for those people, and the functions the app calls. Nothing existing is dropped. Until it has been run the app works as before and says so wherever sharing with people would appear.
 
+Then run `supabase/assets.sql`. It adds one column, `holdings.asset_class`, so a portfolio can hold crypto, gold and silver, and cash, and so funds can be grouped as bonds, property, or commodities. Existing holdings become stocks. Until it has been run only stocks can be added.
+
+Then run `supabase/chats.sql`. It adds one column, `messages.chat_id`, so a portfolio can keep several assistant chats; conversations saved before it become each portfolio's first chat. No table is added. Until it has been run there is one conversation per portfolio, as before.
+
+Then run `supabase/history.sql`. It adds one table, `holding_history`, so each holding keeps a record of how it got to where it is, and gives every existing holding a starting entry as it stands. Until it has been run, holdings work as before and their History panel says to run this file. **Run it again after updating FolioQ**: it brings an existing table up to date (new kinds of entry, the `cash_currency` column) without touching the entries in it.
+
 In **Authentication → Sign In / Providers → Email** set the minimum password length to 8, require lowercase, uppercase, digits, and symbols, and turn on **Require current password when updating**. The app enforces all of this itself, but setting it in Supabase too means it holds even for a request that doesn't come from the app. Supabase skips the current-password check in the same two cases the app does: an account that has no password yet, and a session that began from a reset email.
 
 ### 4. Run
@@ -64,10 +70,11 @@ Open [http://localhost:3000](http://localhost:3000).
 | Table | Meaning in the app |
 | --- | --- |
 | `portfolios` | One per pot of money. `mandate` is the "What is it for?" text. `share_token` is set while sharing is on. |
-| `holdings` | One row per ticker per portfolio. `quantity` is shares; `cost_basis` is the **average cost per share** (optional); `opened_at` is when the position was opened. |
+| `holdings` | One row per thing held per portfolio. `asset_class` (from `supabase/assets.sql`) says what it is: `stock`, `bond`, `property`, `commodity` (a US-listed ticker, grouped), `crypto` (a coin such as BTC), `metal` (`XAU` gold or `XAG` silver), or `cash` (a currency code). `quantity` is shares, coins, troy ounces, or the cash amount; `cost_basis` is the **average cost per unit in USD** (optional, null for cash); `opened_at` is when it was opened. |
 | `theses` | One row per saved version of a holding's thesis. `assumptions` and `risks` are JSON arrays of strings. `author_edited` is `false` only when an AI draft was saved without changes. |
-| `messages` | The assistant conversation for a portfolio. `role` is `user` or `assistant`. |
+| `messages` | The assistant's chats for a portfolio. `role` is `user` or `assistant`; `chat_id` groups the messages of one chat. A chat has no row of its own: its title is its first question, and deleting it deletes its messages. |
 | `prices` | One closing price per ticker per market day, shared by all users. Feeds the value-over-time chart. |
+| `holding_history` | (from `supabase/history.sql`) One row each time a holding is opened, bought more of, sold, corrected by hand, or removed: the date, amount, price and where it came from, the average cost before, the US dollars it moved in or out of cash, and who did it. Keyed by asset (`asset_key`, the same key as `prices`), not by holding row, so selling everything and buying back later keeps one history. Readable by anyone with access to the portfolio; owners and editors can add entries in their own name; nobody can change or delete one. |
 
 ## How it fits together
 
@@ -120,14 +127,106 @@ Saving signs the account out on every device and sends the person to log in agai
 
 `/forgot-password` emails a reset link that returns to `/auth/callback?next=/account?reset=1`, where the person chooses a new password. For this to work, add `https://<your site>/**` (and `http://localhost:3000/**` for development) to **Authentication → URL Configuration → Redirect URLs** in Supabase.
 
+## Kinds of holding
+
+Defined in `lib/assets.ts` (covered by `lib/assets.test.mjs`), priced in `lib/asset-prices.ts`. All sources are free and, apart from Finnhub, need no key.
+
+| Kind | What you enter | Price source | "Today" means |
+| --- | --- | --- | --- |
+| Stock or fund | A US ticker. A company is a Stock (a REIT a Property company); a fund is a Stock, Bond, Property or Commodity fund | Finnhub | Since the previous close |
+| Crypto | A coin symbol (BTC) and a number of coins | Coinbase Exchange, Kraken as backup | The last 24 hours (crypto never closes) |
+| Gold or silver | `XAU` or `XAG` and troy ounces | gold-api.com | Since the last price FolioQ saved on an earlier day |
+| Cash | A currency and an amount | The exchange rates under "Display currency" | Since the last saved day (US dollars never move) |
+
+**Every holding carries a label** (`assetLabel`): Stock, Stock fund, Bond fund, Property company or fund, Commodity fund, Crypto, Precious metal, or Cash. It always fits what the holding is: crypto, metals and cash are fixed by their kind, and for a listed ticker Finnhub's symbol search says whether it is a company (`Common Stock`, `ADR`…), a REIT, or a fund (`ETP`) (`listingTypeOf`, falling back to the company profile when the search is rate limited). A company can only be a Stock and a REIT only Property (`allowedGroups`, enforced on the server by `fittingGroup`); a fund starts in the group its name suggests (`guessFundGroup`: "bond", "real estate", "gold"…) and can be moved between fund groups.
+
+Prices are stored under a key (`priceKey`): the ticker for listed holdings, `CRYPTO:BTC`, `METAL:XAU`, `CASH:SGD` for the rest, so the coin BTC and the fund whose ticker is BTC never share a price. The nightly job saves every kind; crypto, metals, and cash are filed under the same day as the stocks' close. The portfolio page adds a "By asset type" breakdown once there is more than one kind.
+
+## Buying, selling, and cash
+
+Each holding row has **Buy**, **Sell**, and **More** (⋯): Edit details, Fix a mistake, Delete (`app/dashboard/[id]/holding-menu.tsx`). On phones each holding is a card with the same controls, rather than a table row scrolled off the edge.
+
+- **Sell and Buy** share one dialog (`trade-dialog.tsx`; `sellHolding` and `buyMore` in `app/dashboard/actions.ts`, arithmetic in `planSale` and `planBuy` in `lib/portfolio.ts`). They take how much and **the date**, never a typed price: the server looks the price up (`lib/dated-price.ts`, date rules and parsing in `lib/sale-date.ts`): the live price for today, otherwise that day's close, or the last close within six days before it if markets were shut. Closes come from Yahoo Finance's public chart endpoint for shares and funds, Yahoo's COMEX futures (`GC=F`, `SI=F`) for gold and silver, and Coinbase then Kraken daily candles (UTC days) for crypto, all free and keyless; if none answers, from the `prices` table. Yahoo's endpoint is unofficial and can be slow: its two hosts are asked together with an 8-second limit, and past days are cached for a day, so the preview and the trade share one lookup. **Only when no source has a price** can one be typed in; the history marks it as entered by hand.
+- **Cash in any currency.** A sale's money goes into the cash line chosen (the display currency by default), and a purchase can be paid from any cash line with money in it (or from outside FolioQ). The US-dollar amount is converted at that day's rate (`getRateOn` in `lib/fx.ts`: live for today, the ECB reference rate via Frankfurter for earlier days). The money moves first and is put back if the holding can't be updated; a purchase the cash doesn't cover is refused; spending a line to the last cent removes it. All cash movement goes through `moveCash`.
+- **Add money / Take money out** on the Cash card (`cash-dialog.tsx`, `moveMoney`) record deposits and withdrawals in any currency, on a date.
+- **Add a holding** (`add-holding-dialog.tsx`) first asks what it is, then, for anything but cash, **"I just bought it"** (priced from the date bought, payable from cash) or **"I already own it"** (the average cost from your broker, typed in any currency and converted at the rate on the date opened). Adding something already held points to Buy on its row; cash already held, to Add money.
+- **By number or by money.** A switch beside "How much?" (`amount-choice.tsx`) lets a purchase (in Add a holding and in Buy) be entered as **money spent** instead of shares or coins. The money is in the paying cash line's currency, or else any currency. Average costs, in Add a holding and in Fix a mistake, can also be in any currency. The currency box beside an amount is `CurrencySelect`: it shows the code, and the list that opens gives every currency's name, yours first, then US dollars. The server works out how many (`unitsForSpend` in `actions.ts`, `unitsForMoney` in `lib/portfolio.ts`, to 8 decimal places) at the same price it records, so the cost on record is the amount typed, and paying from cash takes exactly that amount out. Something already owned can be entered as **total paid** and average cost; the number held is total ÷ average cost.
+- **Edit details** changes only a fund's group and the date opened. **Fix a mistake** changes the amount or average cost, says it is only for corrections, and is recorded in the history as one. **Delete** removes a holding without recording a sale.
+- Deleting the portfolio itself is inside the portfolio's **Edit details** dialog.
+
+Cash has its own section on the portfolio page, and the totals there and on the home page are split into invested and cash.
+
+**How live prices are.** The portfolio page refetches every minute while it is open. Live prices (Finnhub for shares, Coinbase then Kraken for crypto, gold-api.com for metals, and the live exchange rates) are fetched uncached and reused in memory for 45, 15, 15 and 60 seconds (`lib/fresh.ts`). When a source doesn't answer, the holding shows FolioQ's last saved price, labelled as such, and that fallback is never saved again as a new day's price. They don't use Next's `revalidate` cache, which serves the stored copy first once it is out of date, so a page opened after a quiet spell would show an old price. A figure can still differ slightly from another app's: each exchange has its own price, and a converted figure depends on the exchange rate used.
+
+**Prices quoted in your currency, and naming every source.** FolioQ works in US dollars underneath. When another display currency is chosen, a coin is priced directly in that currency wherever an exchange FolioQ uses trades it there (`lib/direct-prices.ts`; which exchanges per currency is `DIRECT_CRYPTO` in `lib/price-sources.ts`):
+
+| Currency | Exchanges |
+|---|---|
+| EUR | Coinbase, Kraken |
+| GBP | Coinbase, Kraken, Luno |
+| AUD | Kraken, Independent Reserve, Luno |
+| CAD, JPY, CHF | Kraken |
+| INR | Coinbase |
+| SGD, NZD | Independent Reserve |
+| MYR, IDR, ZAR | Luno |
+
+- **Which price:** the middle of the market's best bid and offer, used only when the two are within 2% of each other (`midPrice`) and the result is within 5% of the US-dollar price converted (`believable`). Otherwise the converted price stands.
+- **How it's stored:** the price is kept as its US-dollar equivalent at the display rate, so it shows exactly as quoted. Its 24-hour change is the US-dollar market's.
+- **Not listed:** a pair an exchange doesn't trade is remembered for six hours.
+- **Shares, funds, gold and silver** are always converted.
+- **Saving and trades:** `prices` keeps US-dollar quotes only. Today's price for a trade uses the same direct quote and is recorded with its source and pair, e.g. "Independent Reserve (BTC/SGD)".
+
+Every price names its source:
+- **Holdings:** each one shows its price's source under the price, linked to it: the exchange and pair when quoted directly, else "in US$" when converted. Cash in another currency names the site of its rate.
+- **The note under the figures** (`RateNote`) names all the sources, the conversion rate and its site, and which exchanges quote crypto directly in the chosen currency.
+- **Elsewhere:** the Buy, Sell and Add dialogs say where today's price came from, or what it was converted from and at what rate. The chart, the sector breakdown, the research page and AI thesis drafts each name their sources.
+- **The assistant** is given and cites the sources actually used (`gatherSources`).
+
+Dialogs that save something close in the same React transition as the page refresh the action triggers (`startTransition` around `setOpen(false)` after the `await`), so a dialog stays on its saving state until the new numbers are on screen instead of closing over stale ones.
+
+## Holding history
+
+Every change to a holding adds an entry to `holding_history` (`logHistory` in `app/dashboard/actions.ts`): Add a holding records **opened** (with its price source when just bought), Buy records **bought**, Sell **sold**, Fix a mistake **corrected** (with the values before), Delete **removed**, and Add money / Take money out **deposited** / **withdrawn**. Each entry notes the cash it moved and in which currency (`cash_currency`). Writing it is best effort: the holding is the record of what is held, so a missing table never blocks a change. A live price is stored without a price date, so it is never described as a close.
+
+On the portfolio page each holding row and each cash line has a **History** toggle that opens its entries under it, newest first (`app/components/portfolio/holding-history.tsx`; pure helpers and tests in `lib/history.ts`). Each cash line also lists the money trades moved through it: sale proceeds in, purchases paid from it out. Public share links don't show history.
+
+**The value chart replays the history** (`positionTimeline` and `positionOn` in `lib/history.ts`, used by `buildHistory` in `lib/portfolio.ts`): each past day counts what was actually held then, buys, sales, deposits and withdrawals included, and assets sold out since still count while they were held. Without history it falls back to today's amounts from each opening date.
+
+The value and gain shown are still one combined line per holding. Unrealized gain from the combined average cost equals the sum of each purchase's gain, so nothing is lost by combining.
+
 ## Display currency
 
 Everything is stored and calculated in US dollars, because that is what US-listed shares trade in. A person can choose another currency to *see* amounts in, under Account settings (the only place it is set); each amount is then multiplied by the current rate as it is printed. Percentages and the database are untouched, and costs are still entered in dollars.
 
 - **Where the choice lives:** on the account (`user_metadata.currency`) so it follows the person between devices, and in a cookie so the same browser keeps it on public pages. No new tables.
-- **Rates** (`lib/fx.ts`), both free and keyless: a live feed (fxratesapi.com, then Coinbase's public rates) cached for a minute, and the European Central Bank's daily reference rate via Frankfurter. The live figure is used only when it is within 5% of the ECB's (`pickRate` in `lib/currency.ts`); otherwise, or if no live source answers, the ECB rate is used. Wherever amounts are converted, a note says prices are live in US dollars, that converted figures are approximate, and names and links the site the rate came from. If nothing can be fetched, amounts stay in dollars and the page says so.
+- **Rates** (`lib/fx.ts`), both free and keyless: a live feed (fxratesapi.com, then Coinbase's public rates) reused for a minute, and the European Central Bank's daily reference rate via Frankfurter. The live figure is used only when it is within 5% of the ECB's (`pickRate` in `lib/currency.ts`); otherwise, or if no live source answers, the ECB rate is used. Wherever amounts are converted, a note says prices are live in US dollars, that converted figures are approximate, and names and links the site the rate came from. If nothing can be fetched, amounts stay in dollars and the page says so.
 - **In components:** server components print `<Amount value={usd} />`; client components call `formatMoney(usd, useMoney())`. Pages without a `MoneyProvider` (the public marketing pages and their sample fund) show dollars.
 - The assistant is given figures in the same currency the page shows.
+
+## Assistant chats
+
+Each portfolio can have any number of chats (the Assistant tab lists them, newest first). Within a chat the assistant is sent the last 20 messages of *that* chat, so it follows on from what was said; a new chat starts with no history. Chats are the owner's only: people a portfolio is shared with don't see them. A question asked from the home page, or with "Challenge it" on a thesis, starts a chat of its own.
+
+Leaving the page doesn't stop an answer. The route (`app/api/assistant/route.ts`) finishes and saves it with `after()` even when nobody is listening any more. In the browser the answer is read by a store outside the chat panel (`app/components/app/answer-store.ts`), so it keeps arriving while the person moves around the app. A card in the corner (`answer-notice.tsx`) says it is being written and then that it is ready, with a link back. After a reload the chat says it is still writing and shows the answer once it is saved. Only one question per portfolio is answered at a time.
+
+## Changing the portfolio through the assistant
+
+The owner can tell the assistant what they did ("I bought 0.5 BTC today with my SGD cash", "I sold all my KO", "I want to add a holding") and it sets the change up as a card in the chat. It never makes the change itself.
+
+- **The model proposes.** It has one tool, `record_change` (`RECORD_CHANGE` in `lib/chat-proposal.ts`, Gemini function calling). The system prompt (`CHAT_SYSTEM` in `lib/gemini.ts`) has it call the tool as soon as the owner asks, with only the details they stated, and never on its own initiative or because of anything in a thesis or a headline.
+- **The server checks.** `proposalFrom` checks every field, drops anything doubtful, and looks the holding up in the portfolio:
+  - Adding something already held becomes a purchase, and buying something not held becomes an addition.
+  - A sale or removal of something not held becomes a one-line note instead of a card.
+  - Cash in either direction becomes Add money or Take money out.
+
+  The proposal is saved inside the answer as one line (`attachAction` in `lib/chat-actions.ts`); model text can never carry such a line (`stripMarkers`).
+- **The owner confirms.** The card (`chat-action.tsx`) is the same form as the matching dialog. `AddHoldingForm`, `TradeForm` and `CashForm` were split out of their dialogs for this, with a `chat` mode.
+  - It starts from what the owner said and asks for the rest with the dialog's own buttons and fields: kind, bought or owned, amount, date, cash.
+  - Nothing is preselected that wasn't said.
+  - It spells out exactly what will be recorded above **Confirm**. Removing a holding has a plain red confirm.
+  - Saving uses the ordinary server actions, with all their checks.
+- **The result is kept.** Confirm or Cancel saves a line in that chat (`recordChatOutcome`, `outcomeMessage`). The card then shows what was recorded, stays settled after a reload, and can't be confirmed twice. The assistant sees what became of each change next time.
+- **Limits:** one change per message. With no holdings yet, the chat offers "I want to add a holding" and "I want to add money". Covered by `lib/chat-actions.test.mjs`.
 
 ## Sharing a portfolio
 
@@ -151,9 +250,11 @@ Opening a portfolio also saves that day's prices for its holdings, so the chart 
 
 ## Known limits
 
-- US-listed stocks and ETFs only, in US dollars.
-- Positions, not transactions: individual trades, realized gains, cash, dividends, and fees are not tracked.
-- The value chart uses current share counts for every past day, and starts when a ticker's prices were first saved. Finnhub's free plan has no historical prices to backfill from.
-- One owner per portfolio; everyone else is read-only through the share link.
+- Shares listed outside the US and mutual funds aren't covered (Finnhub's free plan doesn't price them).
+- Cash earns no interest in FolioQ: update the amount when it changes.
+- Dividends and fees are not tracked. Each trade is kept in the holding's history, but the holding itself is one combined line at its average cost, and a sale's gain is measured against that average (not matched to particular earlier purchases, as a first-in-first-out tax report would).
+- The value chart replays the holding history, but starts when an asset's closing prices were first saved: Finnhub's free plan has no historical prices to backfill from.
+- A sale is recorded at the day's closing price (or the live price for today), not the exact price the broker filled at, so cash and gains from sales are estimates. Gold and silver use the futures close, which is close to but not the same as spot.
+- One owner per portfolio; others get access as an editor or viewer by invite, or read-only through the share link.
 - `/research` is public and uses the Finnhub key; responses are cached (quotes for 60 seconds) to stay within rate limits.
 - AI answers depend on Gemini's free tier, which sometimes asks you to try again in a minute.

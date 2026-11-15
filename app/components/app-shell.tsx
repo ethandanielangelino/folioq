@@ -1,3 +1,4 @@
+import AnswerNotice from '@/app/components/app/answer-notice'
 import AppFrame, { type FramePortfolio } from '@/app/components/app/app-frame'
 import { ToastProvider } from '@/app/components/toast'
 
@@ -23,6 +24,7 @@ export default function AppShell({
       <AppFrame user={user} portfolios={portfolios} invites={invites}>
         {children}
       </AppFrame>
+      <AnswerNotice />
     </ToastProvider>
   )
 }

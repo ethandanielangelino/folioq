@@ -60,7 +60,14 @@ const RANGES = [
 ] as const
 type RangeId = (typeof RANGES)[number]['id']
 
-export default function PerformanceChart({ points: allPoints }: { points: PerformancePoint[] }) {
+export default function PerformanceChart({
+  points: allPoints,
+  replayed = false,
+}: {
+  points: PerformancePoint[]
+  /** True when each day counts what was actually held then, from the holding history. */
+  replayed?: boolean
+}) {
   const money = useMoney()
   const [range, setRange] = useState<RangeId>('ALL')
 
@@ -392,8 +399,12 @@ export default function PerformanceChart({ points: allPoints }: { points: Perfor
 
       {geometry && (
         <p className="mt-3 max-w-xl text-xs leading-5 text-zinc-500 dark:text-zinc-400">
-          Shows what the current holdings were worth on each day, counting each one from the day it
-          was opened. Changes to share counts are not replayed.
+          {replayed
+            ? 'Shows what the portfolio held on each day, buys, sales and cash included, at that day’s closing prices.'
+            : 'Shows what the current holdings were worth on each day, counting each one from the day it was opened.'}{' '}
+          Past days use the daily prices FolioQ saves from the same sources as the live ones (Finnhub, Coinbase or
+          Kraken, gold-api.com), in US dollars; today is the live value.
+          {money.code !== 'USD' && ` Every day is shown in ${money.code} at today’s exchange rate.`}
         </p>
       )}
       {geometry && (

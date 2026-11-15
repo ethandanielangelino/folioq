@@ -16,11 +16,17 @@ export interface HoldingRow {
   portfolio_id: string
   ticker: string
   quantity: number
-  /** Average cost per share */
+  /** Average cost per unit (share, coin, or troy ounce), in USD. Null for cash. */
   cost_basis: number | null
   /** YYYY-MM-DD */
   opened_at: string
   created_at: string
+  /**
+   * What kind of holding this is (see lib/assets.ts). Added by
+   * supabase/assets.sql: absent until that script has been run, when every
+   * holding is a US-listed stock.
+   */
+  asset_class?: string | null
 }
 
 /** A thesis as stored: assumptions and risks are jsonb, so not trusted to be string arrays. */
@@ -56,6 +62,11 @@ export interface MessageRow {
   role: MessageRole
   content: string
   created_at: string
+  /**
+   * Which chat this message belongs to. Added by supabase/chats.sql: absent
+   * until that script has been run, and null on a message saved before it.
+   */
+  chat_id?: string | null
 }
 
 export interface PriceRow {

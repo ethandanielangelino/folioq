@@ -2,9 +2,10 @@ import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { ArrowRight, Check, ChevronRight } from 'lucide-react'
 import AskBar from '@/app/components/app/ask-bar'
+import FocusTabs from '@/app/components/app/focus-tabs'
 import QMark from '@/app/components/app/q-mark'
 import RecordTrack, { type RecordPart } from '@/app/components/app/record-track'
-import { Amount, RateNote } from '@/app/components/money'
+import { Amount, RateNote, RollingAmount } from '@/app/components/money'
 import Wiggle from '@/app/components/motion/wiggle'
 import Delta from '@/app/components/portfolio/delta'
 import LiveSync from '@/app/components/portfolio/live-sync'
@@ -27,7 +28,7 @@ const list = (items: string[]) =>
     ? items.join(' and ')
     : `${items.slice(0, -1).join(', ')}, and ${items[items.length - 1]}`
 
-/** The three parts of a portfolio's record, and the one thing that would move it forward. */
+/** The parts of a portfolio's record, and the one thing that would move it forward. */
 function record(c: PortfolioCard): { parts: RecordPart[]; next: string; href: string; action: string } {
   const page = `/dashboard/${c.portfolio.id}`
   const shared = Boolean(c.portfolio.share_token)
@@ -43,7 +44,6 @@ function record(c: PortfolioCard): { parts: RecordPart[]; next: string; href: st
       state:
         c.holdingCount > 0 && c.missing.length === 0 ? 'done' : c.thesisCount > 0 ? 'partial' : 'todo',
     },
-    { label: 'Share link', detail: shared ? 'on' : 'off', state: shared ? 'done' : 'todo' },
   ]
 
   if (c.holdingCount === 0) {
@@ -57,17 +57,12 @@ function record(c: PortfolioCard): { parts: RecordPart[]; next: string; href: st
       action: c.missing.length === 1 ? 'Write the missing thesis' : `Write ${c.missing.length} theses`,
     }
   }
-  if (!shared) {
-    return {
-      parts,
-      next: 'Every holding has a thesis. Nobody else can see it yet.',
-      href: page,
-      action: 'Share it',
-    }
-  }
+  // Sharing is optional, so a private portfolio isn't behind: it is simply private.
   return {
     parts,
-    next: 'On record and shared. Keep the holdings and theses current.',
+    next: shared
+      ? 'Every holding has a thesis, and it is shared. Keep it current.'
+      : 'Every holding has a thesis. Keep it current as things change.',
     href: page,
     action: 'Open',
   }
@@ -125,10 +120,6 @@ function tasks(cards: PortfolioCard[]): Task[] {
   return found
 }
 
-const tab =
-  'shrink-0 rounded-full px-4 py-2 text-sm font-medium whitespace-nowrap transition-colors aria-[current=true]:bg-black aria-[current=true]:text-white dark:aria-[current=true]:bg-white dark:aria-[current=true]:text-black'
-const idleTab =
-  'text-zinc-600 hover:bg-black/[.05] hover:text-black dark:text-zinc-400 dark:hover:bg-white/[.07] dark:hover:text-zinc-50'
 
 export default async function DashboardHome({ searchParams }: Props) {
   const user = await getSessionUser()
@@ -150,10 +141,11 @@ export default async function DashboardHome({ searchParams }: Props) {
   const total = scope.reduce(
     (sum, c) => ({
       value: sum.value + c.totals.marketValue,
+      cash: sum.cash + c.cash,
       day: sum.day + c.totals.dayChange,
       holdings: sum.holdings + c.holdingCount,
     }),
-    { value: 0, day: 0, holdings: 0 }
+    { value: 0, day: 0, holdings: 0, cash: 0 }
   )
   const previous = total.value - total.day
 
@@ -218,10 +210,14 @@ export default async function DashboardHome({ searchParams }: Props) {
       {live}
       <header>
         <p className="text-sm text-zinc-600 dark:text-zinc-400">
-          {firstName ? `${firstName}, you answer for` : 'You answer for'}
+          {focus
+            ? `${focus.portfolio.name} is worth`
+            : firstName
+              ? `${firstName}, your portfolios are worth`
+              : 'Your portfolios are worth'}
         </p>
         <h1 className="mt-3 text-[3.25rem] leading-[1.05] text-black tabular-nums sm:text-7xl dark:text-zinc-50">
-          <Amount value={total.value} />
+          <RollingAmount value={total.value} />
         </h1>
         <p className="mt-3 flex flex-wrap items-baseline gap-x-2 gap-y-1 text-sm text-zinc-600 dark:text-zinc-400">
           <span>
@@ -229,6 +225,18 @@ export default async function DashboardHome({ searchParams }: Props) {
               ? `in ${focus.portfolio.name}, ${total.holdings === 1 ? '1 holding' : `${total.holdings} holdings`}.`
               : `across ${cards.length === 1 ? '1 portfolio' : `${cards.length} portfolios`} and ${total.holdings === 1 ? '1 holding' : `${total.holdings} holdings`}.`}
           </span>
+          {total.cash > 0 && (
+            <span className="tabular-nums">
+              <span className="font-medium text-black dark:text-zinc-50">
+                <Amount value={total.value - total.cash} />
+              </span>{' '}
+              invested,{' '}
+              <span className="font-medium text-black dark:text-zinc-50">
+                <Amount value={total.cash} />
+              </span>{' '}
+              in cash.
+            </span>
+          )}
           {total.holdings > 0 && (
             <span className="tabular-nums">
               Today{' '}
@@ -240,30 +248,10 @@ export default async function DashboardHome({ searchParams }: Props) {
         <RateNote className="mt-2 max-w-2xl text-xs leading-5 text-zinc-500 dark:text-zinc-400" />
 
         {cards.length > 1 && (
-          <nav
-            aria-label="Choose a portfolio"
-            className="-mx-1 mt-6 flex gap-1 overflow-x-auto px-1 pb-1"
-          >
-            <Link
-              href="/dashboard"
-              scroll={false}
-              aria-current={focus === null}
-              className={`${tab} ${focus === null ? '' : idleTab}`}
-            >
-              All portfolios
-            </Link>
-            {cards.map((c) => (
-              <Link
-                key={c.portfolio.id}
-                href={`/dashboard?focus=${c.portfolio.id}`}
-                scroll={false}
-                aria-current={focus?.portfolio.id === c.portfolio.id}
-                className={`${tab} ${focus?.portfolio.id === c.portfolio.id ? '' : idleTab}`}
-              >
-                {c.portfolio.name}
-              </Link>
-            ))}
-          </nav>
+          <FocusTabs
+            portfolios={cards.map((c) => ({ id: c.portfolio.id, name: c.portfolio.name }))}
+            focusId={focus?.portfolio.id ?? null}
+          />
         )}
       </header>
 

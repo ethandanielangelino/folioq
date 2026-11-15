@@ -105,10 +105,14 @@ export const sampleHoldings: Holding[] = valued.map((h) => {
   const versions = theses[h.id] ?? []
   return {
     ...h,
+    assetClass: 'stock' as const,
+    key: h.ticker,
     name: profiles[h.ticker].name,
     industry: profiles[h.ticker].industry,
     thesis: versions[0] ?? null,
     thesisHistory: versions.slice(1),
+    // Invented prices, labelled as such so the sample never passes them off as real.
+    priceSource: { name: 'Made-up example', url: '' },
   }
 })
 

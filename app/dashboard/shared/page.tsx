@@ -160,7 +160,6 @@ export default async function SharedPage() {
                           memberId={item.memberId}
                           portfolioName={item.portfolioName}
                           ownerName={item.ownerName}
-                          className="rounded text-sm text-zinc-500 underline-offset-4 hover:text-black hover:underline dark:text-zinc-400 dark:hover:text-zinc-50"
                         />
                       </div>
                     </li>

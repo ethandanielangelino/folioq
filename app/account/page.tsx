@@ -108,8 +108,8 @@ export default async function AccountPage() {
             Prices are live in US dollars only
           </p>
           <p className="mt-1">
-            US-listed shares trade in US dollars, so that is the currency prices arrive in and the
-            one you enter costs in. In any other currency, every amount (values, costs, gains,
+            Prices for shares, crypto, and gold and silver all arrive in US dollars, and that is
+            the currency you enter costs in. In any other currency, every amount (values, costs, gains,
             and the day&apos;s rise or fall) is the dollar figure converted at the current
             exchange rate. It may not reflect exactly what you would get on exchanging, and past
             costs are converted at today&apos;s rate, not the rate on the day you bought.

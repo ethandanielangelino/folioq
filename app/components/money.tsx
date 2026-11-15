@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { ChevronDown } from 'lucide-react'
 import { setCurrency } from '@/app/actions/currency'
+import AnimatedNumber from '@/app/components/motion/animated-number'
 import {
   CURRENCIES,
   USD,
@@ -15,6 +16,7 @@ import {
   type Money,
 } from '@/lib/currency'
 import type { MoneyState } from '@/lib/money'
+import { COINBASE, FINNHUB, GOLD_API, KRAKEN, directExchanges } from '@/lib/price-sources'
 
 const DEFAULT: MoneyState = { ...USD, source: 'usd', asOf: '', wanted: 'USD', provider: null }
 const MoneyContext = createContext<MoneyState>(DEFAULT)
@@ -70,9 +72,49 @@ function when(state: MoneyState): string {
 }
 
 /**
- * The disclaimer shown wherever amounts have been converted: prices are live
- * in US dollars, the converted figures are approximate, and which site the
- * exchange rate came from. Shows nothing when amounts are in US dollars.
+ * Like <Amount>, but when the figure changes (switching which portfolio the
+ * home page shows) it counts to the new value instead of jumping.
+ */
+export function RollingAmount({ value }: { value: number }) {
+  const current = useMoney()
+  return <AnimatedNumber value={value} format={(v) => money(v, current)} />
+}
+
+/** Where the full explanation of prices and exchange rates lives. */
+const ABOUT_PRICES = '/terms#prices'
+
+function AboutPrices() {
+  return (
+    <Link href={ABOUT_PRICES} className="underline underline-offset-2">
+      About prices
+    </Link>
+  )
+}
+
+/** A source named in a note, linked to its site. */
+function Source({ source }: { source: { name: string; url: string } }) {
+  return (
+    <a href={source.url} target="_blank" rel="noopener noreferrer" className="underline underline-offset-2">
+      {source.name}
+    </a>
+  )
+}
+
+/** "Finnhub for shares and funds, Coinbase or Kraken for crypto, gold-api.com for gold and silver" */
+function UsdSources() {
+  return (
+    <>
+      <Source source={FINNHUB} /> for shares and funds, <Source source={COINBASE} /> or{' '}
+      <Source source={KRAKEN} /> for crypto, <Source source={GOLD_API} /> for gold and silver
+    </>
+  )
+}
+
+/**
+ * The note shown wherever amounts appear: prices are estimates, where they
+ * come from, and, when another currency is chosen, which crypto is quoted
+ * directly in it and which figures are converted, at what rate, from which
+ * site. The full explanation is a link away.
  */
 export function RateNote({
   className = '',
@@ -83,47 +125,64 @@ export function RateNote({
   pointToSettings?: boolean
 }) {
   const state = useMoney()
-  if (state.source === 'usd') return null
+
+  if (state.source === 'usd') {
+    return (
+      <p className={className}>
+        Prices are estimates from public market data, in US dollars: <UsdSources />. <AboutPrices />
+      </p>
+    )
+  }
 
   if (state.source === 'unavailable') {
     return (
       <p className={className}>
-        Exchange rates for {state.wanted} can&apos;t be reached right now, so amounts are shown in
-        US dollars, the currency prices are quoted in.
+        Prices are estimates from public market data, in US dollars: <UsdSources />. Exchange rates for{' '}
+        {state.wanted} can&apos;t be reached right now, so amounts are in US dollars. <AboutPrices />
       </p>
     )
   }
 
   const stamp = when(state)
+  const direct = directExchanges(state.code)
   return (
     <p className={className}>
-      Prices are live in US dollars. Amounts in {state.code} are converted at {describeRate(state)}
-      {state.source === 'live'
-        ? `, a live rate${stamp ? ` as of ${stamp}` : ''}`
-        : `, the daily reference rate${stamp ? ` for ${stamp}` : ''}`}
+      Prices are estimates from public market data. Shares, funds, gold and silver are priced in US
+      dollars (<Source source={FINNHUB} />, <Source source={GOLD_API} />) and shown in {state.code} at{' '}
+      {describeRate(state)}
+      {state.source === 'live' ? ` (live${stamp ? `, ${stamp}` : ''})` : ` (daily reference${stamp ? `, ${stamp}` : ''})`}
       {state.provider && (
         <>
           {' '}
-          from{' '}
-          <a
-            href={state.provider.url}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="underline underline-offset-2"
-          >
-            {state.provider.name}
-          </a>
+          from <Source source={state.provider} />
         </>
       )}
-      , and may not reflect exactly what you would get on exchanging.
+      .{' '}
+      {direct.length > 0 ? (
+        <>
+          Crypto is priced directly in {state.code} where{' '}
+          {direct.map((source, i) => (
+            <span key={source.name}>
+              {i > 0 && (i === direct.length - 1 ? ' or ' : ', ')}
+              <Source source={source} />
+            </span>
+          ))}{' '}
+          trades it, and otherwise converted from <Source source={COINBASE} /> or <Source source={KRAKEN} />
+          &apos;s US-dollar price.
+        </>
+      ) : (
+        <>
+          Crypto is converted the same way from <Source source={COINBASE} /> or <Source source={KRAKEN} />
+          &apos;s US-dollar price: none of the exchanges FolioQ uses quotes it directly in {state.code}.
+        </>
+      )}{' '}
+      <AboutPrices />
       {pointToSettings && (
         <>
           {' '}
-          Change the currency in{' '}
           <Link href="/account" className="underline underline-offset-2">
-            account settings
+            Change currency
           </Link>
-          .
         </>
       )}
     </p>

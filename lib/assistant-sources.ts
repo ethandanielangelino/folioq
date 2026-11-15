@@ -1,8 +1,13 @@
 // Server-only: decides which outside information the assistant may use for a
-// portfolio. It gets Finnhub's market data and, for the largest holdings,
-// recent news headlines from the publishers in TRUSTED_PUBLISHERS. Nothing else.
+// portfolio. It gets the market data the page itself used, each source named
+// (Finnhub, Coinbase, Kraken, an exchange quoting crypto directly in the
+// display currency, gold-api.com, the exchange-rate site) and, for the largest
+// holdings, recent news headlines from the publishers in TRUSTED_PUBLISHERS.
+// Nothing else.
 
 import { isNewsReport, trustedPublisher, type AssistantSource } from '@/lib/assistant-format'
+import { kindOf } from '@/lib/assets'
+import type { Provider } from '@/lib/fx'
 import type { PortfolioView } from '@/lib/data'
 import { getCompanyNews } from '@/lib/finnhub'
 import { formatDate, marketDate } from '@/lib/format'
@@ -11,6 +16,13 @@ export interface PromptSource extends AssistantSource {
   /** Extra context for the model that is not shown in the sources list. */
   ticker?: string
   summary?: string
+  /** For market data: what in the portfolio data it supplied. */
+  covers?: string
+}
+
+const list = (tickers: string[]) => {
+  const unique = [...new Set(tickers)]
+  return unique.length <= 1 ? (unique[0] ?? '') : `${unique.slice(0, -1).join(', ')} and ${unique.at(-1)}`
 }
 
 /** How many of the largest holdings get headlines, and how many each. */
@@ -22,20 +34,65 @@ const tidy = (text: string, max: number) => {
   return flat.length > max ? `${flat.slice(0, max - 1).trimEnd()}…` : flat
 }
 
-export async function gatherSources(view: PortfolioView): Promise<PromptSource[]> {
+export async function gatherSources(
+  view: PortfolioView,
+  /** The display currency's rate and where it came from, when figures are converted. */
+  display?: { code: string; provider: Provider | null }
+): Promise<PromptSource[]> {
   const sources: PromptSource[] = []
 
-  if (view.holdings.some((h) => h.price !== null)) {
+  // The sources the page's own prices came from, one entry each, listed first.
+  const day = formatDate(marketDate())
+  const bySource = new Map<string, { url: string; listed: string[]; coins: string[]; direct: string[]; metals: string[]; cash: string[] }>()
+  for (const h of view.holdings) {
+    const source = h.priceSource
+    // A saved price has no outside source to cite; the data marks it as unpriced or stale.
+    if (!source || source.saved || h.price === null || !source.url.startsWith('http')) continue
+    const entry = bySource.get(source.name) ?? { url: source.url, listed: [], coins: [], direct: [], metals: [], cash: [] }
+    const kind = kindOf(h.assetClass)
+    if (source.pair) entry.direct.push(source.pair)
+    else if (kind === 'listed') entry.listed.push(h.ticker)
+    else if (kind === 'crypto') entry.coins.push(h.ticker)
+    else if (kind === 'metal') entry.metals.push(h.ticker)
+    else if (kind === 'cash') entry.cash.push(h.ticker)
+    bySource.set(source.name, entry)
+  }
+  for (const [publisher, e] of bySource) {
+    const parts = [
+      e.listed.length > 0 && `the prices, values, company names, and sector labels of ${list(e.listed)} (in US dollars)`,
+      e.coins.length > 0 && `the prices, values, and 24-hour changes of ${list(e.coins)} (in US dollars)`,
+      e.direct.length > 0 && `the prices and values of ${list(e.direct.map((p) => p.split('/')[0]))}, quoted directly in ${e.direct[0].split('/')[1]} on its ${list(e.direct)} market${e.direct.length > 1 ? 's' : ''}`,
+      e.metals.length > 0 && `the prices and values of ${list(e.metals)} per troy ounce (in US dollars)`,
+      e.cash.length > 0 && `the exchange rates behind the value of the ${list(e.cash)} cash`,
+    ].filter(Boolean)
     sources.push({
-      n: 1,
+      n: sources.length + 1,
       kind: 'market',
-      publisher: 'Finnhub',
-      title: `Live quotes and company profiles, retrieved ${formatDate(marketDate())}`,
-      url: 'https://finnhub.io',
+      publisher,
+      title: `${e.cash.length > 0 && parts.length === 1 ? 'Exchange rates' : 'Live market data'}, retrieved ${day}`,
+      url: e.url,
+      covers: parts.join('; '),
     })
   }
+  // Figures shown in another currency were converted at a rate from this site.
+  if (display && display.code !== 'USD' && display.provider) {
+    const existing = sources.find((s) => s.publisher === display.provider!.name)
+    const covers = `the exchange rate used to show US-dollar figures in ${display.code}`
+    if (existing) existing.covers = `${existing.covers}; ${covers}`
+    else {
+      sources.push({
+        n: sources.length + 1,
+        kind: 'market',
+        publisher: display.provider.name,
+        title: `US dollar to ${display.code} exchange rate, retrieved ${day}`,
+        url: display.provider.url,
+        covers,
+      })
+    }
+  }
 
-  const largest = view.holdings.slice(0, NEWS_HOLDINGS)
+  // Headlines exist for listed companies only; a coin's symbol would match an unrelated company.
+  const largest = view.holdings.filter((h) => kindOf(h.assetClass) === 'listed').slice(0, NEWS_HOLDINGS)
   const news = await Promise.all(largest.map((h) => getCompanyNews(h.ticker, 30)))
   const seen = new Set<string>()
 
@@ -72,7 +129,7 @@ export function describeSources(sources: PromptSource[]): string {
   return sources
     .map((s) =>
       s.kind === 'market'
-        ? `[${s.n}] ${s.publisher} market data: the prices, values, gains, weights, company names, and sector labels in the portfolio data above. ${s.title}.`
+        ? `[${s.n}] ${s.publisher} market data: ${s.covers ?? 'prices'} in the portfolio data above, and the weights and totals they feed into. ${s.title}.`
         : `[${s.n}] ${s.publisher}, about ${s.ticker}: "${s.title}"${s.summary ? ` Summary: ${s.summary}` : ''}`
     )
     .join('\n')

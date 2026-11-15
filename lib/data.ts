@@ -2,8 +2,22 @@
 // shapes the pages render. Shared by the owner's dashboard and shared links.
 
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { getProfile, getQuotes, type CompanyProfile, type Quote } from '@/lib/finnhub'
+import { getAssetQuotes, cryptoName, lastClosesBefore } from '@/lib/asset-prices'
+import { withDirectQuotes } from '@/lib/direct-prices'
+import { CURRENCIES } from '@/lib/currency'
+import {
+  METALS,
+  groupLabel,
+  kindOf,
+  priceKey,
+  toAssetClass,
+  type AssetClass,
+} from '@/lib/assets'
+import { getProfile, type CompanyProfile, type Quote } from '@/lib/finnhub'
 import { marketDate } from '@/lib/format'
+import { getMoney } from '@/lib/money'
+import type { PriceSource } from '@/lib/price-sources'
+import { historyNotSetUp, positionOn, positionTimeline, toHistoryEntry, type HistoryEntry } from '@/lib/history'
 import {
   buildHistory,
   computeTotals,
@@ -29,10 +43,15 @@ export function isUuid(value: string): boolean {
   return UUID_PATTERN.test(value)
 }
 
-function toHoldingInput(row: HoldingRow): HoldingInput {
+type AssetInput = HoldingInput & { assetClass: AssetClass; key: string }
+
+function toHoldingInput(row: HoldingRow): AssetInput {
+  const assetClass = toAssetClass(row.asset_class)
   return {
     id: row.id,
     ticker: row.ticker,
+    assetClass,
+    key: priceKey(row.ticker, assetClass),
     // Postgres numerics can arrive as strings depending on the driver.
     quantity: Number(row.quantity),
     costBasis: row.cost_basis === null ? null : Number(row.cost_basis),
@@ -62,12 +81,22 @@ export function toThesis(row: ThesisRow): Thesis {
 }
 
 export interface Holding extends ValuedHolding {
+  /** What kind of holding it is. 'stock' for every holding before supabase/assets.sql. */
+  assetClass: AssetClass
+  /** Where its prices are kept: the ticker for listed holdings, prefixed for the rest. */
+  key: string
   name: string | null
   industry: string | null
   /** Latest version, or null when no thesis has been written. */
   thesis: Thesis | null
   /** Earlier versions, newest first. */
   thesisHistory: Thesis[]
+  /**
+   * Where its price came from: the exchange and pair when it is quoted directly
+   * in the display currency, otherwise a US-dollar source. Null when unpriced,
+   * and for US dollars held as cash.
+   */
+  priceSource: PriceSource | null
 }
 
 export interface SectorSlice {
@@ -80,15 +109,25 @@ export interface PortfolioView {
   portfolio: PortfolioRow
   holdings: Holding[]
   sectors: SectorSlice[]
+  /** Value by kind of asset: Stocks, Bonds, Crypto, Cash and so on. */
+  assetGroups: SectorSlice[]
+  /** True when any holding is crypto, whose day change is over 24 hours. */
+  hasCrypto: boolean
   totals: PortfolioTotals
   /** Oldest first; ends with today's live value when every holding has a quote. */
   history: HistoryPoint[]
-  /** Latest quotes for the holdings, for saving today's prices. */
+  /** Latest US-dollar quotes for the holdings, for saving today's prices. */
   quotes: Record<string, Quote | null>
+  /** The display currency the holdings were valued for (direct quotes depend on it). */
+  pricedIn: string
   /** False until supabase/setup.sql has added portfolios.share_token. */
   sharingAvailable: boolean
   /** When the quotes above were fetched (ms since epoch). */
   fetchedAt: number
+  /** Every recorded change to the holdings, for the History panels. */
+  holdingHistory: PortfolioHistory
+  /** True when the value chart counts what was held each day, from the history. */
+  historyReplayed: boolean
 }
 
 export interface PortfolioCard {
@@ -99,6 +138,8 @@ export interface PortfolioCard {
   missing: string[]
   /** Tickers whose current thesis is an AI draft saved without changes. */
   drafts: string[]
+  /** Value held as cash rather than invested. */
+  cash: number
   totals: PortfolioTotals
   /** Recent value history for the sparkline, oldest first. */
   history: HistoryPoint[]
@@ -120,13 +161,20 @@ async function getProfiles(tickers: string[]): Promise<Record<string, CompanyPro
   return profiles
 }
 
-function groupBySector(holdings: Holding[]): SectorSlice[] {
+/**
+ * Value grouped under a label. Weights are a share of `total`, which defaults
+ * to the holdings given; pass the whole portfolio's value to group a subset.
+ */
+function groupBy(
+  holdings: Holding[],
+  labelFor: (h: Holding) => string,
+  total = holdings.reduce((sum, h) => sum + h.marketValue, 0)
+): SectorSlice[] {
   const byLabel = new Map<string, number>()
   for (const h of holdings) {
-    const label = h.industry ?? UNCLASSIFIED
+    const label = labelFor(h)
     byLabel.set(label, (byLabel.get(label) ?? 0) + h.marketValue)
   }
-  const total = holdings.reduce((sum, h) => sum + h.marketValue, 0)
   return [...byLabel.entries()]
     .map(([label, marketValue]) => ({
       label,
@@ -136,16 +184,59 @@ function groupBySector(holdings: Holding[]): SectorSlice[] {
     .sort((a, b) => b.marketValue - a.marketValue)
 }
 
+const investedOf = <T extends { assetClass: AssetClass }>(holdings: T[]) =>
+  holdings.filter((h) => h.assetClass !== 'cash')
+
+/** Cash has no cost by design, so it isn't reported as a holding with its cost missing. */
+function withoutCash(totals: PortfolioTotals, valued: (ValuedHolding & { assetClass: AssetClass })[]) {
+  const cash = new Set(valued.filter((h) => h.assetClass === 'cash').map((h) => h.ticker))
+  return { ...totals, uncosted: totals.uncosted.filter((ticker) => !cash.has(ticker)) }
+}
+
+function holdingName(
+  h: AssetInput,
+  profile: CompanyProfile | null,
+  coin: string | null
+): string | null {
+  switch (kindOf(h.assetClass)) {
+    case 'crypto':
+      return coin
+    case 'metal':
+      return METALS[h.ticker] ? `${METALS[h.ticker]}, per troy ounce` : null
+    case 'cash': {
+      const currency = CURRENCIES.find((c) => c.code === h.ticker)
+      return currency ? `Cash, ${currency.name}` : 'Cash'
+    }
+    default:
+      return profile?.name ?? null
+  }
+}
+
 export async function buildPortfolioView(
   portfolio: PortfolioRow,
   holdingRows: HoldingRow[],
   thesisRows: ThesisRow[],
-  priceRows: PriceRow[]
+  priceRows: PriceRow[],
+  holdingHistory: PortfolioHistory = { available: false, entries: [] }
 ): Promise<PortfolioView> {
   const inputs = holdingRows.map(toHoldingInput)
-  const tickers = [...new Set(inputs.map((h) => h.ticker))]
+  // Company details exist for listed tickers only; coins get a name from Coinbase.
+  const listedTickers = [
+    ...new Set(inputs.filter((h) => kindOf(h.assetClass) === 'listed').map((h) => h.ticker)),
+  ]
+  const coins = [...new Set(inputs.filter((h) => h.assetClass === 'crypto').map((h) => h.ticker))]
 
-  const [quotes, profiles] = await Promise.all([getQuotes(tickers), getProfiles(tickers)])
+  const today = marketDate()
+  const [quotes, profiles, coinNames, money] = await Promise.all([
+    getAssetQuotes(inputs, lastClosesBefore(priceRows, today)),
+    getProfiles(listedTickers),
+    Promise.all(coins.map(async (coin) => [coin, await cryptoName(coin)] as const)),
+    getMoney(),
+  ])
+  const coinName = new Map(coinNames)
+  // Coins quoted directly in the display currency use that price; the rest stay
+  // US-dollar prices, converted when shown. `quotes` stays in US dollars for saving.
+  const shown = await withDirectQuotes(inputs, quotes, money)
 
   const thesesByHolding = new Map<string, Thesis[]>()
   for (const row of thesisRows) {
@@ -157,21 +248,23 @@ export async function buildPortfolioView(
     list.sort((a, b) => b.version - a.version || b.createdAt.localeCompare(a.createdAt))
   }
 
-  const valued = valueHoldings(inputs, quotes)
+  const valued = valueHoldings(inputs, shown)
   const holdings: Holding[] = valued.map((h) => {
     const versions = thesesByHolding.get(h.id) ?? []
     return {
       ...h,
-      name: profiles[h.ticker]?.name ?? null,
-      industry: profiles[h.ticker]?.industry ?? null,
+      name: holdingName(h, profiles[h.ticker] ?? null, coinName.get(h.ticker) ?? null),
+      industry: kindOf(h.assetClass) === 'listed' ? (profiles[h.ticker]?.industry ?? null) : null,
       thesis: versions[0] ?? null,
       thesisHistory: versions.slice(1),
+      priceSource: shown[h.key]?.source ?? null,
     }
   })
-  const totals = computeTotals(valued)
+  const totals = withoutCash(computeTotals(valued), valued)
 
-  // Stored closes for past days, then today's live value on the end.
-  const today = marketDate()
+  // Stored closes for past days, then today's live value on the end. With a
+  // history, each past day counts what was actually held that day.
+  const timeline = positionTimeline(holdingHistory.entries)
   const history = buildHistory(
     inputs,
     priceRows
@@ -180,7 +273,10 @@ export async function buildPortfolioView(
         date: String(p.price_date).slice(0, 10),
         close: Number(p.close),
       }))
-      .filter((p) => p.date < today)
+      .filter((p) => p.date < today),
+    timeline.size > 0
+      ? { keys: [...timeline.keys()], on: (key, date) => positionOn(timeline.get(key), date) }
+      : undefined
   )
   if (holdings.length > 0 && totals.unpriced.length === 0) {
     history.push({ date: today, marketValue: totals.marketValue, costBasis: totals.costBasis })
@@ -189,28 +285,50 @@ export async function buildPortfolioView(
   return {
     portfolio,
     holdings,
-    sectors: groupBySector(holdings),
+    // A sector only means something for a stock, so only stocks are listed,
+    // each as a share of the whole portfolio. "By asset type" covers the rest.
+    sectors: groupBy(
+      holdings.filter((h) => h.assetClass === 'stock'),
+      (h) => h.industry ?? UNCLASSIFIED,
+      totals.marketValue
+    ),
+    assetGroups: groupBy(holdings, (h) => groupLabel(h.assetClass)),
+    hasCrypto: holdings.some((h) => h.assetClass === 'crypto'),
     totals,
     history,
     quotes,
+    pricedIn: money.code,
     sharingAvailable: 'share_token' in portfolio,
     fetchedAt: Date.now(),
+    holdingHistory,
+    historyReplayed: timeline.size > 0,
   }
 }
 
 async function loadView(client: SupabaseClient, portfolio: PortfolioRow): Promise<PortfolioView> {
-  const holdings = await client.from('holdings').select('*').eq('portfolio_id', portfolio.id)
+  const [holdings, holdingHistory] = await Promise.all([
+    client.from('holdings').select('*').eq('portfolio_id', portfolio.id),
+    getHistory(client, portfolio.id),
+  ])
   if (holdings.error) throw new Error(holdings.error.message)
   const holdingRows = (holdings.data ?? []) as HoldingRow[]
 
-  if (holdingRows.length === 0) return buildPortfolioView(portfolio, [], [], [])
+  if (holdingRows.length === 0 && holdingHistory.entries.length === 0) {
+    return buildPortfolioView(portfolio, [], [], [], holdingHistory)
+  }
 
   const ids = holdingRows.map((h) => h.id)
-  const tickers = [...new Set(holdingRows.map((h) => h.ticker))]
-  const earliest = holdingRows.map((h) => String(h.opened_at).slice(0, 10)).sort()[0]
+  // Prices for what is held now, and for anything held before (sold since).
+  const tickers = [
+    ...new Set([...holdingRows.map((h) => toHoldingInput(h).key), ...holdingHistory.entries.map((e) => e.assetKey)]),
+  ]
+  const earliest = [
+    ...holdingRows.map((h) => String(h.opened_at).slice(0, 10)),
+    ...holdingHistory.entries.map((e) => e.tradeDate),
+  ].sort()[0]
 
   const [theses, prices] = await Promise.all([
-    client.from('theses').select('*').in('holding_id', ids),
+    ids.length > 0 ? client.from('theses').select('*').in('holding_id', ids) : { data: [], error: null },
     client
       .from('prices')
       .select('*')
@@ -226,7 +344,8 @@ async function loadView(client: SupabaseClient, portfolio: PortfolioRow): Promis
     portfolio,
     holdingRows,
     (theses.data ?? []) as ThesisRow[],
-    priceRows
+    priceRows,
+    holdingHistory
   )
 }
 
@@ -304,6 +423,102 @@ export async function getMessages(
   return (data ?? []) as MessageRow[]
 }
 
+/**
+ * The id used for messages that have no chat of their own: everything in a
+ * database where supabase/chats.sql hasn't been run, and any stray message
+ * saved without one.
+ */
+export const EARLIER_CHAT = 'earlier'
+
+export interface Chat {
+  id: string
+  /** The first question asked in it, shortened. */
+  title: string
+  /** When its last message was saved. */
+  updatedAt: string
+  messages: MessageRow[]
+}
+
+const chatTitle = (messages: MessageRow[]): string => {
+  const first = messages.find((m) => m.role === 'user') ?? messages[0]
+  const text = (first?.content ?? '').replace(/\s+/g, ' ').trim()
+  return text.length > 64 ? `${text.slice(0, 63).trimEnd()}…` : text || 'Chat'
+}
+
+export interface PortfolioHistory {
+  /** False until supabase/history.sql has been run. */
+  available: boolean
+  entries: HistoryEntry[]
+}
+
+/**
+ * Every recorded change to a portfolio's holdings, newest first. History is a
+ * nice-to-have: if it can't be read the page shows holdings without it.
+ */
+export async function getHistory(supabase: SupabaseClient, portfolioId: string): Promise<PortfolioHistory> {
+  const { data, error } = await supabase
+    .from('holding_history')
+    .select('*')
+    .eq('portfolio_id', portfolioId)
+    .order('trade_date', { ascending: false })
+    .order('created_at', { ascending: false })
+    .limit(2000)
+  if (error) return { available: !historyNotSetUp(error), entries: [] }
+  const entries = (data ?? []).map((row) => toHistoryEntry(row as Record<string, unknown>))
+  return { available: true, entries: entries.filter((e): e is HistoryEntry => e !== null) }
+}
+
+/**
+ * A portfolio's assistant chats, most recently used first.
+ *
+ * `available` says whether the database can keep more than one (the chat_id
+ * column from supabase/chats.sql exists). When it can't, everything is one
+ * chat, exactly as before.
+ */
+export async function getChats(
+  supabase: SupabaseClient,
+  portfolioId: string
+): Promise<{ available: boolean; chats: Chat[] }> {
+  const rows = await getMessages(supabase, portfolioId)
+
+  let available: boolean
+  if (rows.length > 0) {
+    available = 'chat_id' in rows[0]
+  } else {
+    // Nothing saved yet, so ask for the column directly: an error means it isn't there.
+    const probe = await supabase.from('messages').select('chat_id').limit(1)
+    available = !probe.error
+  }
+
+  const groups = new Map<string, MessageRow[]>()
+  for (const row of rows) {
+    const key = available && row.chat_id ? row.chat_id : EARLIER_CHAT
+    const list = groups.get(key) ?? []
+    list.push(row)
+    groups.set(key, list)
+  }
+
+  const chats = [...groups.entries()]
+    .map(([id, messages]) => ({
+      id,
+      title: chatTitle(messages),
+      updatedAt: messages[messages.length - 1].created_at,
+      messages,
+    }))
+    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+
+  return { available, chats }
+}
+
+/**
+ * Whether holdings can be crypto, metals, or cash yet: the asset_class column
+ * from supabase/assets.sql exists.
+ */
+export async function assetTypesAvailable(supabase: SupabaseClient): Promise<boolean> {
+  const { error } = await supabase.from('holdings').select('asset_class').limit(1)
+  return !error
+}
+
 /** Names of the portfolios this user owns, oldest first, for navigation. */
 export async function getPortfolioNames(
   supabase: SupabaseClient,
@@ -359,18 +574,23 @@ export async function getPortfolioCards(
     byPortfolio.set(row.portfolio_id, list)
   }
 
-  const tickers = [...new Set(holdingRows.map((h) => h.ticker))]
+  const allInputs = holdingRows.map(toHoldingInput)
+  const keys = [...new Set(allInputs.map((h) => h.key))]
   const today = marketDate()
   const since = new Date(Date.now() - SPARKLINE_DAYS * 86_400_000).toISOString().slice(0, 10)
 
-  const [quotes, prices] = await Promise.all([
-    getQuotes(tickers),
-    tickers.length > 0
-      ? supabase.from('prices').select('*').in('ticker', tickers).gte('price_date', since)
-      : Promise.resolve({ data: [] as PriceRow[], error: null }),
-  ])
+  const prices =
+    keys.length > 0
+      ? await supabase.from('prices').select('*').in('ticker', keys).gte('price_date', since)
+      : { data: [] as PriceRow[], error: null }
   // The sparkline is decoration: if prices can't be read, cards simply go without.
-  const closes = (prices.error ? [] : ((prices.data ?? []) as PriceRow[]))
+  const priceRows = prices.error ? [] : ((prices.data ?? []) as PriceRow[])
+  const [usdQuotes, money] = await Promise.all([
+    getAssetQuotes(allInputs, lastClosesBefore(priceRows, today)),
+    getMoney(),
+  ])
+  const quotes = await withDirectQuotes(allInputs, usdQuotes, money)
+  const closes = priceRows
     .map((p) => ({
       ticker: p.ticker,
       date: String(p.price_date).slice(0, 10),
@@ -381,7 +601,7 @@ export async function getPortfolioCards(
   return rows.map((portfolio) => {
     const inputs = (byPortfolio.get(portfolio.id) ?? []).map(toHoldingInput)
     const valued = valueHoldings(inputs, quotes)
-    const totals = computeTotals(valued)
+    const totals = withoutCash(computeTotals(valued), valued)
 
     const history = buildHistory(inputs, closes)
     if (valued.length > 0 && totals.unpriced.length === 0) {
@@ -390,10 +610,12 @@ export async function getPortfolioCards(
 
     return {
       portfolio,
-      holdingCount: valued.length,
-      thesisCount: valued.filter((h) => latest.has(h.id)).length,
-      missing: valued.filter((h) => !latest.has(h.id)).map((h) => h.ticker),
-      drafts: valued.filter((h) => latest.get(h.id)?.edited === false).map((h) => h.ticker),
+      // Holdings and theses are about investments; cash is money held, not a position to justify.
+      holdingCount: investedOf(valued).length,
+      thesisCount: investedOf(valued).filter((h) => latest.has(h.id)).length,
+      missing: investedOf(valued).filter((h) => !latest.has(h.id)).map((h) => h.ticker),
+      drafts: investedOf(valued).filter((h) => latest.get(h.id)?.edited === false).map((h) => h.ticker),
+      cash: valued.filter((h) => h.assetClass === 'cash').reduce((sum, h) => sum + h.marketValue, 0),
       totals,
       history,
     }
@@ -408,7 +630,8 @@ export async function getPortfolioCards(
  */
 export async function savePrices(quotes: Record<string, Quote | null>): Promise<number> {
   const rows = Object.entries(quotes)
-    .filter((entry): entry is [string, Quote] => entry[1] !== null && entry[1].timestamp > 0)
+    // A fallback to the last saved price isn't a new price: saving it would file it under today.
+    .filter((entry): entry is [string, Quote] => entry[1] !== null && entry[1].timestamp > 0 && !entry[1].source?.saved)
     .map(([ticker, quote]) => ({
       ticker,
       price_date: marketDate(new Date(quote.timestamp * 1000)),

@@ -34,10 +34,13 @@ export default function AllocationBars({
   title,
   rows,
   emptyText,
+  note,
 }: {
   title: string
   rows: AllocationRow[]
   emptyText: string
+  /** A line under the bars, e.g. where the labels came from. */
+  note?: React.ReactNode
 }) {
   const shown = foldTail(rows)
   const largest = shown.reduce((max, r) => Math.max(max, r.weight), 0)
@@ -45,12 +48,15 @@ export default function AllocationBars({
   return (
     <section className={`${card} p-6`}>
       <h2 className="text-xl text-black dark:text-zinc-50">{title}</h2>
+      {note && shown.length > 0 && (
+        <p className="mt-1 text-xs leading-5 text-zinc-500 dark:text-zinc-400">{note}</p>
+      )}
 
       {shown.length === 0 ? (
         <p className="mt-3 text-sm text-zinc-500 dark:text-zinc-400">{emptyText}</p>
       ) : (
         <ul className="mt-5 flex flex-col gap-4">
-          {shown.map((row) => (
+          {shown.map((row, index) => (
             <li key={row.label}>
               <div className="flex items-baseline justify-between gap-3 text-sm">
                 <span className="min-w-0 truncate font-medium text-zinc-800 dark:text-zinc-200">
@@ -65,9 +71,10 @@ export default function AllocationBars({
               </div>
               <div className="mt-2 h-2" aria-hidden="true">
                 <div
-                  className="h-2 rounded-r-[4px] bg-[var(--viz-series)]"
+                  className="bar-grow h-2 rounded-r-[4px] bg-[var(--viz-series)]"
                   style={{
                     width: `${largest > 0 ? Math.max((row.weight / largest) * 100, 0.75) : 0}%`,
+                    animationDelay: `${Math.min(index, 8) * 60}ms`,
                   }}
                 />
               </div>

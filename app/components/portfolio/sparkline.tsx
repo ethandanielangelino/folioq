@@ -34,9 +34,12 @@ export default function Sparkline({ points }: { points: HistoryPoint[] }) {
         d={`${line} L${lastX.toFixed(1)},${HEIGHT} L${x(0).toFixed(1)},${HEIGHT} Z`}
         fill="var(--viz-series)"
         opacity={0.08}
+        className="fade-late"
       />
       <path
         d={line}
+        pathLength={1}
+        className="line-draw"
         fill="none"
         stroke="var(--viz-series)"
         strokeWidth={2}
@@ -48,7 +51,7 @@ export default function Sparkline({ points }: { points: HistoryPoint[] }) {
         cy={lastY}
         r={3.5}
         fill="var(--viz-series)"
-        className="stroke-white dark:stroke-zinc-900"
+        className="fade-late stroke-white dark:stroke-zinc-900"
         strokeWidth={2}
       />
     </svg>

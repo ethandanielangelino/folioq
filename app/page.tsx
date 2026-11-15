@@ -47,7 +47,7 @@ const steps = [
   {
     title: "Add what you hold",
     description:
-      "A ticker, a share count, and your average cost. Live prices fill in value, weight, and gain.",
+      "A stock or fund, crypto, gold or silver, or cash, with how much you hold and what it cost. Live prices fill in value, weight, and gain.",
   },
   {
     title: "Write down why",

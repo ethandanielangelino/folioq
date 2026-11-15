@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import { LayoutGroup, motion } from 'motion/react'
 import Image from 'next/image'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
@@ -18,8 +19,26 @@ const SIDEBAR_KEY = 'folioq-sidebar'
 /** How many portfolios are listed in the sidebar before "All portfolios" takes over. */
 const LISTED = 6
 
+// The highlight behind the current page is a separate element (NavHighlight)
+// that slides from item to item, so items only change their text colour.
 const item =
-  'flex items-center gap-3 rounded-xl px-3 py-2.5 text-[0.95rem] text-zinc-700 transition-colors hover:bg-black/[.05] aria-[current=page]:bg-mint-600/[.12] aria-[current=page]:font-medium aria-[current=page]:text-mint-800 dark:text-zinc-300 dark:hover:bg-white/[.07] dark:aria-[current=page]:bg-mint-400/[.14] dark:aria-[current=page]:text-mint-200'
+  'relative isolate flex items-center gap-3 rounded-xl px-3 py-2.5 text-[0.95rem] text-zinc-700 transition-colors duration-200 hover:bg-black/[.04] aria-[current=page]:font-medium aria-[current=page]:text-mint-800 aria-[current=page]:hover:bg-transparent dark:text-zinc-300 dark:hover:bg-white/[.06] dark:aria-[current=page]:text-mint-200'
+
+const subItem =
+  'relative isolate block truncate rounded-lg px-2.5 py-1.5 text-sm text-zinc-600 transition-colors duration-200 hover:bg-black/[.04] hover:text-black aria-[current=page]:font-medium aria-[current=page]:text-mint-800 aria-[current=page]:hover:bg-transparent dark:text-zinc-400 dark:hover:bg-white/[.06] dark:hover:text-zinc-50 dark:aria-[current=page]:text-mint-200'
+
+/** The tinted pill behind the current page. Rendered inside whichever link is current. */
+function NavHighlight({ show, small = false }: { show: boolean; small?: boolean }) {
+  if (!show) return null
+  return (
+    <motion.span
+      layoutId="nav-highlight"
+      aria-hidden="true"
+      transition={{ type: 'spring', stiffness: 480, damping: 40, mass: 0.7 }}
+      className={`absolute inset-0 -z-10 bg-mint-600/[.12] dark:bg-mint-400/[.14] ${small ? 'rounded-lg' : 'rounded-xl'}`}
+    />
+  )
+}
 
 const iconButton =
   'flex h-9 w-9 items-center justify-center rounded-full text-zinc-600 transition-colors hover:bg-black/[.06] hover:text-black dark:text-zinc-400 dark:hover:bg-white/[.08] dark:hover:text-zinc-50'
@@ -44,11 +63,14 @@ function SidebarContent({
   portfolios,
   invites,
   onNavigate,
+  instance = 'column',
 }: {
   user: { email: string; name: string | null }
   portfolios: FramePortfolio[]
   invites: number
   onNavigate?: () => void
+  /** Which copy this is, so the column and the phone drawer don't share a highlight. */
+  instance?: string
 }) {
   const pathname = usePathname()
   const inResearch = pathname.startsWith('/dashboard/research')
@@ -61,8 +83,10 @@ function SidebarContent({
 
   return (
     <>
+      <LayoutGroup id={instance}>
       <nav aria-label="App" className="flex flex-1 flex-col gap-1 overflow-y-auto px-3 pb-4">
         <Link href="/dashboard" onClick={onNavigate} aria-current={current(pathname === '/dashboard')} className={item}>
+          <NavHighlight show={pathname === '/dashboard'} />
           <LayoutGrid className="h-[1.15rem] w-[1.15rem]" aria-hidden="true" />
           Home
         </Link>
@@ -73,6 +97,7 @@ function SidebarContent({
           data-section={inPortfolios ? 'open' : undefined}
           className={item}
         >
+          <NavHighlight show={pathname === '/dashboard/portfolios'} />
           <Briefcase className="h-[1.15rem] w-[1.15rem]" aria-hidden="true" />
           Portfolios
         </Link>
@@ -84,8 +109,9 @@ function SidebarContent({
                   href={`/dashboard/${portfolio.id}`}
                   onClick={onNavigate}
                   aria-current={current(pathname === `/dashboard/${portfolio.id}`)}
-                  className="block truncate rounded-lg px-2.5 py-1.5 text-sm text-zinc-600 transition-colors hover:bg-black/[.05] hover:text-black aria-[current=page]:bg-mint-600/[.12] aria-[current=page]:font-medium aria-[current=page]:text-mint-800 dark:text-zinc-400 dark:hover:bg-white/[.07] dark:hover:text-zinc-50 dark:aria-[current=page]:bg-mint-400/[.14] dark:aria-[current=page]:text-mint-200"
+                  className={subItem}
                 >
+                  <NavHighlight show={pathname === `/dashboard/${portfolio.id}`} small />
                   {portfolio.name}
                 </Link>
               </li>
@@ -104,6 +130,7 @@ function SidebarContent({
           </ul>
         )}
         <Link href="/dashboard/shared" onClick={onNavigate} aria-current={current(inShared)} className={item}>
+          <NavHighlight show={inShared} />
           <Users className="h-[1.15rem] w-[1.15rem]" aria-hidden="true" />
           <span className="flex-1">Shared with me</span>
           {invites > 0 && (
@@ -114,14 +141,17 @@ function SidebarContent({
           )}
         </Link>
         <Link href="/dashboard/research" onClick={onNavigate} aria-current={current(inResearch)} className={item}>
+          <NavHighlight show={inResearch} />
           <Search className="h-[1.15rem] w-[1.15rem]" aria-hidden="true" />
           Research
         </Link>
         <Link href="/account" onClick={onNavigate} aria-current={current(pathname === '/account')} className={item}>
+          <NavHighlight show={pathname === '/account'} />
           <UserRound className="h-[1.15rem] w-[1.15rem]" aria-hidden="true" />
           Account
         </Link>
       </nav>
+      </LayoutGroup>
 
       <div className="border-t border-black/[.07] p-3 dark:border-white/[.08]">
         <AccountMenu email={user.email} name={user.name} variant="row" />
@@ -147,6 +177,7 @@ export default function AppFrame({
   children: React.ReactNode
 }) {
   const [drawerOpen, setDrawerOpen] = useState(false)
+  const pathname = usePathname()
 
   function toggleSidebar() {
     // Wide screens: show or hide the column, and remember it. The attribute
@@ -168,17 +199,19 @@ export default function AppFrame({
 
   return (
     <div className="flex flex-1 bg-zinc-50 dark:bg-black">
-      <aside className="app-sidebar sticky top-0 hidden h-dvh w-72 shrink-0 flex-col border-r border-black/[.07] bg-zinc-100/60 lg:flex dark:border-white/[.08] dark:bg-zinc-950">
-        <div className="px-6 pt-5 pb-6">
-          <Wordmark />
+      <aside className="app-sidebar sticky top-0 hidden h-dvh w-72 shrink-0 overflow-hidden border-r border-black/[.07] bg-zinc-100/60 lg:block dark:border-white/[.08] dark:bg-zinc-950">
+        <div className="flex h-full w-72 flex-col">
+          <div className="px-6 pt-5 pb-6">
+            <Wordmark />
+          </div>
+          <SidebarContent user={user} portfolios={portfolios} invites={invites} />
         </div>
-        <SidebarContent user={user} portfolios={portfolios} invites={invites} />
       </aside>
 
       <Dialog.Root open={drawerOpen} onOpenChange={setDrawerOpen}>
         <Dialog.Portal>
-          <Dialog.Backdrop className="fixed inset-0 z-50 bg-black/30 backdrop-blur-[2px] transition-opacity duration-200 data-[ending-style]:opacity-0 data-[starting-style]:opacity-0 lg:hidden" />
-          <Dialog.Popup className="fixed inset-y-0 left-0 z-50 flex w-[min(19rem,85vw)] flex-col bg-zinc-50 shadow-2xl transition-transform duration-200 ease-out outline-none data-[ending-style]:-translate-x-full data-[starting-style]:-translate-x-full lg:hidden dark:bg-zinc-950">
+          <Dialog.Backdrop className="fixed inset-0 z-50 bg-black/30 backdrop-blur-[2px] transition-opacity duration-300 data-[ending-style]:opacity-0 data-[starting-style]:opacity-0 lg:hidden" />
+          <Dialog.Popup className="fixed inset-y-0 left-0 z-50 flex w-[min(19rem,85vw)] flex-col bg-zinc-50 shadow-2xl transition-transform duration-300 ease-[cubic-bezier(0.22,0.8,0.24,1)] outline-none data-[ending-style]:-translate-x-full data-[starting-style]:-translate-x-full lg:hidden dark:bg-zinc-950">
             <div className="flex items-center justify-between px-5 pt-4 pb-5">
               <Dialog.Title render={<div />}>
                 <span className="sr-only">Menu</span>
@@ -193,6 +226,7 @@ export default function AppFrame({
               portfolios={portfolios}
               invites={invites}
               onNavigate={() => setDrawerOpen(false)}
+              instance="drawer"
             />
           </Dialog.Popup>
         </Dialog.Portal>
@@ -208,7 +242,7 @@ export default function AppFrame({
               title="Show or hide the menu"
               className={iconButton}
             >
-              <PanelLeft className="h-[1.15rem] w-[1.15rem]" aria-hidden="true" />
+              <PanelLeft className="app-toggle-icon h-[1.15rem] w-[1.15rem]" aria-hidden="true" />
             </button>
             {/* The sidebar carries the name on wide screens; this is for when it is hidden. */}
             <div className="app-topmark">
@@ -240,7 +274,10 @@ export default function AppFrame({
         </header>
 
         <main className="mx-auto w-full max-w-6xl flex-1 px-6 pt-4 pb-14 sm:px-10 sm:pt-6 lg:px-16">
-          {children}
+          {/* Keyed by page, so each page you open rises in; refreshes of the same page don't. */}
+          <div key={pathname} className="rise-in">
+            {children}
+          </div>
         </main>
       </div>
     </div>

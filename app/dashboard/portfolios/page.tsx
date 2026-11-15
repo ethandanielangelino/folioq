@@ -19,7 +19,7 @@ const firstSteps = [
   },
   {
     title: 'Add what it holds',
-    text: 'A ticker, a share count, and your average cost. Prices fill in the rest.',
+    text: 'A stock or fund, crypto, gold or silver, or cash: how much you hold and what it cost.'
   },
   {
     title: 'Write down why',

@@ -41,10 +41,12 @@ const terms = [
     ],
   },
   {
+    id: 'prices',
     title: 'Prices and other market data',
     body: [
-      'Prices, company details, and news come from Finnhub. They may be delayed, incomplete, unavailable, or wrong. Values, gains, and weights are calculated from those prices and from the numbers you entered, so an error in either carries through.',
-      'You can choose the currency amounts are shown in. US-listed shares trade in US dollars, so FolioQ records and calculates in dollars and converts for display at the current exchange rate. That makes a converted figure an indication, not what you would receive on exchanging, and it applies today’s rate to costs you paid in the past.',
+      'Prices, company details, and news for listed shares and funds come from Finnhub; crypto prices from Coinbase (or Kraken), gold and silver prices from gold-api.com, and the value of cash from exchange-rate services. Any of them may be delayed, incomplete, unavailable, or wrong. Crypto trades around the clock, so its change for the day is measured over the last 24 hours. Values, gains, and weights are calculated from those prices and from the numbers you entered, so an error in either carries through. All prices in FolioQ are estimates and may not match the exact price you would buy or sell at.',
+      'When you record a purchase or a sale, you give the date and FolioQ looks up the price: the live price for today, otherwise that day’s closing price, or the last close before it if markets were shut. Closing prices for shares and funds come from Yahoo Finance, for gold and silver from COMEX futures on Yahoo Finance (which track the spot price closely but are not the same), and for crypto from Coinbase or Kraken, by UTC day; if none of them answers, from the daily prices FolioQ saved itself. The price your broker gave you may differ, so the costs, cash, and gains recorded are estimates too. A purchase can be paid from, and a sale paid into, cash in any currency: the amount is converted at that day’s exchange rate (the live rate for today, the European Central Bank’s reference rate for earlier days). Only when no source has a price for the date can one be typed in, and the history shows it was entered by hand.',
+      'You can choose the currency amounts are shown in. Shares, funds, and gold and silver are priced in US dollars and converted for display at the current exchange rate, which FolioQ names together with the site it came from. Crypto is priced directly in your currency where an exchange FolioQ uses trades the coin in it: Coinbase or Kraken for euros, pounds, yen, Swiss francs, Canadian and Australian dollars; Independent Reserve for Singapore, Australian, and New Zealand dollars; Luno for ringgit, rupiah, and rand. That price is the middle of the exchange’s best bid and offer, and is used only when the two are close together and the price is within 5% of the US-dollar price converted; otherwise, and for every other coin and currency, the US-dollar price is converted. Each holding names where its price came from. The 24-hour change of a coin priced directly is its move in the US-dollar market. Underneath, FolioQ records and calculates in US dollars, so a converted figure is an indication, not what you would receive on exchanging, and it applies today’s rate to costs you paid in the past.',
       'Do not rely on FolioQ as the official record of an account. Your broker’s statements are the record.',
     ],
   },
@@ -52,6 +54,7 @@ const terms = [
     title: 'AI drafts and the assistant',
     body: [
       'FolioQ can draft a thesis and answer questions about a portfolio using a language model. A language model can state things that are false, out of date, or simply made up. Treat what it writes as a starting point to check, never as fact or advice.',
+      'When you ask it to, the assistant can set up a change to your portfolio, such as a holding to add, a purchase or sale to record, or money in or out, as a form in the chat filled in from what you said. It never makes a change itself: nothing is saved until you check the form and confirm it, and you are responsible for what you confirm. It does not suggest changes you did not ask for.',
       'The assistant is built to explain and to question, not to advise. It is instructed never to recommend buying, selling, or holding anything, never to predict prices, and never to say what suits you. If it ever appears to, treat that as an error and not as advice.',
       'Its outside information is limited to Finnhub’s market data and recent headlines from a fixed list of established news publishers. When an answer relies on either, the sources are listed under it so you can check them yourself.',
       'A thesis saved without changes is labelled as an AI draft wherever it appears, including on shared links.',
@@ -103,7 +106,7 @@ const stored = [
   {
     term: 'Your portfolios',
     detail:
-      'Portfolio names and descriptions, the holdings you enter (ticker, share count, cost, date opened), every saved version of each thesis, your conversations with the assistant, and who each portfolio is shared with.',
+      'Portfolio names and descriptions, the holdings you enter (what each one is, how much, its cost, and when you got it), every saved version of each thesis, your conversations with the assistant, and who each portfolio is shared with.',
   },
   {
     term: 'In your browser',
@@ -120,12 +123,17 @@ const providers = [
   {
     term: 'Finnhub',
     detail:
-      'Supplies prices, company details, and news. It is sent ticker symbols only, never who is asking.',
+      'Supplies share and fund prices, company details and industries, and news. It is sent ticker symbols only, never who is asking.',
   },
   {
     term: 'Google Gemini',
     detail:
       'Writes thesis drafts and assistant answers. When you ask for either, it is sent that portfolio’s description, holdings, and theses, and your question. It is not sent your name or email.',
+  },
+  {
+    term: 'Coinbase, Kraken, Independent Reserve, Luno, gold-api.com, and Yahoo Finance',
+    detail:
+      'Supply crypto prices (Coinbase, with Kraken as a backup, and in some currencies Independent Reserve or Luno for a price quoted directly in that currency), gold and silver prices (gold-api.com), and past closing prices (Yahoo Finance, Coinbase, Kraken). They are sent only the coin, metal, or ticker symbol and the currency, never who is asking.',
   },
   {
     term: 'Exchange-rate services',
@@ -139,11 +147,11 @@ const providers = [
   },
 ]
 
-function Clauses({ items }: { items: { title: string; body: string[] }[] }) {
+function Clauses({ items }: { items: { id?: string; title: string; body: string[] }[] }) {
   return (
     <div className="flex flex-col gap-9">
       {items.map((clause) => (
-        <div key={clause.title}>
+        <div key={clause.title} id={clause.id} className="scroll-mt-28">
           <h3 className="text-lg font-semibold text-black dark:text-zinc-50">{clause.title}</h3>
           <div className="mt-2 flex flex-col gap-3">
             {clause.body.map((paragraph) => (

@@ -53,6 +53,18 @@ export function formatDate(isoDate: string): string {
   })
 }
 
+/** "2026-11-13" -> "Fri, Nov 13, 2026" */
+export function formatDayDate(isoDate: string): string {
+  const [y, m, d] = isoDate.slice(0, 10).split('-').map(Number)
+  return new Date(Date.UTC(y, m - 1, d)).toLocaleDateString('en-US', {
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    timeZone: 'UTC',
+  })
+}
+
 /** "2026-01-05" -> "Jan 5" */
 export function formatShortDate(isoDate: string): string {
   const [y, m, d] = isoDate.slice(0, 10).split('-').map(Number)

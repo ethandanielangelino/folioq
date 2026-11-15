@@ -2,6 +2,8 @@
 
 import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
+import { Trash2 } from 'lucide-react'
+import { BinFace, binButton } from '@/app/components/bin-button'
 import { leavePortfolio, respondToInvite } from '@/app/dashboard/actions'
 import {
   dangerButton,
@@ -78,7 +80,7 @@ export function LeaveButton({
   memberId,
   portfolioName,
   ownerName,
-  className = outlineButton,
+  className = binButton,
   label = 'Remove from my list',
 }: {
   memberId: string
@@ -116,7 +118,9 @@ export function LeaveButton({
         if (!next) setError('')
       }}
     >
-      <DialogTrigger className={className}>{label}</DialogTrigger>
+      <DialogTrigger className={className} aria-label={label} title={label}>
+        <BinFace label={label} />
+      </DialogTrigger>
       <DialogContent className={dialogPanel}>
         <DialogTitle className="text-2xl text-black dark:text-zinc-50">
           Remove {portfolioName} from your list?
@@ -133,6 +137,7 @@ export function LeaveButton({
         <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
           <DialogClose className={outlineButton}>Keep it</DialogClose>
           <button type="button" onClick={leave} disabled={pending} className={dangerButton}>
+            <Trash2 className="h-4 w-4" aria-hidden="true" />
             {pending ? 'Removing…' : 'Remove from my list'}
           </button>
         </div>

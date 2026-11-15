@@ -7,4 +7,4 @@
 export const CONTACT_EMAIL = ''
 
 /** When the terms and privacy policy last changed. YYYY-MM-DD. */
-export const TERMS_UPDATED = '2026-11-12'
+export const TERMS_UPDATED = '2026-11-13'

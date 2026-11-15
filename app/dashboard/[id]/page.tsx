@@ -12,14 +12,22 @@ import PortfolioTabs from '@/app/components/portfolio/tabs'
 import ThesisList from '@/app/components/portfolio/thesis-list'
 import { outlineButton } from '@/app/components/styles'
 import AssistantPanel from '@/app/dashboard/[id]/assistant-panel'
-import DeletePortfolioButton from '@/app/dashboard/[id]/delete-portfolio-button'
-import HoldingDialog from '@/app/dashboard/[id]/holding-dialog'
+import AddHoldingDialog from '@/app/dashboard/[id]/add-holding-dialog'
+import CashDialog from '@/app/dashboard/[id]/cash-dialog'
+import HoldingMenu from '@/app/dashboard/[id]/holding-menu'
+import TradeDialog from '@/app/dashboard/[id]/trade-dialog'
 import ShareDialog from '@/app/dashboard/[id]/share-dialog'
 import ThesisDialog from '@/app/dashboard/[id]/thesis-dialog'
 import PortfolioFormDialog from '@/app/dashboard/portfolio-form-dialog'
 import { getSessionUser } from '@/lib/auth'
 import { LeaveButton } from '@/app/dashboard/shared/invite-actions'
-import { getMessages, getOwnedPortfolioView, getPortfolioRole, savePrices } from '@/lib/data'
+import {
+  assetTypesAvailable,
+  getChats,
+  getOwnedPortfolioView,
+  getPortfolioRole,
+  savePrices,
+} from '@/lib/data'
 import { marketDate } from '@/lib/format'
 import { APP_RESEARCH } from '@/lib/routes'
 import { getPeople, getSharedWithMe, timeLeft } from '@/lib/sharing'
@@ -30,8 +38,6 @@ type Props = {
   searchParams: Promise<{ edit?: string | string[]; ask?: string | string[] }>
 }
 
-const textLink =
-  'rounded text-xs font-medium text-zinc-600 underline underline-offset-4 hover:text-black dark:text-zinc-400 dark:hover:text-zinc-50'
 const smallButton = `${outlineButton} px-4 py-2`
 const purposePrompt =
   'inline-flex items-center gap-2 rounded-full border border-dashed border-mint-600/60 px-4 py-1.5 text-sm font-medium text-mint-800 transition-colors hover:bg-mint-600/[.08] dark:border-mint-400/60 dark:text-mint-200 dark:hover:bg-mint-400/[.1]'
@@ -68,10 +74,11 @@ export default async function PortfolioPage({ params, searchParams }: Props) {
   const canEdit = isOwner || role === 'editor'
 
   // The assistant conversation and the list of who has access are the owner's.
-  const [messages, people, sharedWithMe] = await Promise.all([
-    isOwner ? getMessages(supabase, portfolio.id) : [],
+  const [chatState, people, sharedWithMe, assetTypes] = await Promise.all([
+    isOwner ? getChats(supabase, portfolio.id) : { available: false, chats: [] },
     isOwner ? getPeople(supabase, portfolio.id) : null,
     isOwner ? null : getSharedWithMe(supabase),
+    canEdit ? assetTypesAvailable(supabase) : false,
   ])
   const membership = sharedWithMe?.find((s) => s.portfolioId === portfolio.id) ?? null
   const today = marketDate()
@@ -80,28 +87,46 @@ export default async function PortfolioPage({ params, searchParams }: Props) {
   // slowing the page down.
   after(() => savePrices(view.quotes))
 
-  const withThesis = holdings.filter((h) => h.thesis).length
+  // Theses are for investments; cash is uninvested money and needs none.
+  const invested = holdings.filter((h) => h.assetClass !== 'cash')
+  const withThesis = invested.filter((h) => h.thesis).length
   const hasPurpose = Boolean(portfolio.mandate?.trim())
   const editable = { id: portfolio.id, name: portfolio.name, mandate: portfolio.mandate }
 
+  // The portfolio's cash lines: what purchases can be paid from and sales paid into.
+  const cashLines = holdings
+    .filter((h) => h.assetClass === 'cash')
+    .map((h) => ({ currency: h.ticker, amount: h.quantity }))
+
+  // Each row's controls: Buy and Sell (not for cash), then More: edit details, fix a mistake, delete.
   const holdingActions = !canEdit ? undefined : Object.fromEntries(
-    holdings.map((h) => [
-      h.id,
-      <HoldingDialog
-        key={h.id}
-        portfolioId={portfolio.id}
-        today={today}
-        holding={{
-          id: h.id,
-          ticker: h.ticker,
-          quantity: h.quantity,
-          costBasis: h.costBasis,
-          openedAt: h.openedAt,
-        }}
-        triggerLabel="Edit"
-        triggerClassName={textLink}
-      />,
-    ])
+    holdings.map((h) => {
+      const editable = {
+        id: h.id,
+        ticker: h.ticker,
+        assetClass: h.assetClass,
+        quantity: h.quantity,
+        costBasis: h.costBasis,
+        openedAt: h.openedAt,
+      }
+      return [
+        h.id,
+        <span key={h.id} className="inline-flex items-center gap-2">
+          {h.assetClass !== 'cash' &&
+            (['buy', 'sell'] as const).map((side) => (
+              <TradeDialog
+                key={side}
+                side={side}
+                portfolioId={portfolio.id}
+                holding={editable}
+                today={today}
+                cashLines={cashLines}
+              />
+            ))}
+          <HoldingMenu portfolioId={portfolio.id} holding={editable} today={today} />
+        </span>,
+      ]
+    })
   )
 
   const thesisActions = !canEdit ? undefined : Object.fromEntries(
@@ -171,9 +196,10 @@ export default async function PortfolioPage({ params, searchParams }: Props) {
               <>
                 <PortfolioFormDialog
                   portfolio={editable}
-                  triggerLabel="Edit"
+                  triggerLabel="Edit details"
                   triggerClassName={outlineButton}
                   defaultOpen={editPurpose && hasPurpose}
+                  holdingCount={holdings.length}
                 />
                 <ShareDialog
                   portfolioId={portfolio.id}
@@ -187,7 +213,7 @@ export default async function PortfolioPage({ params, searchParams }: Props) {
               </>
             )}
             {canEdit && (
-              <HoldingDialog portfolioId={portfolio.id} today={today} triggerLabel="Add a holding" />
+              <AddHoldingDialog portfolioId={portfolio.id} today={today} assetTypes={assetTypes} cashLines={cashLines} />
             )}
           </div>
         </div>
@@ -214,7 +240,6 @@ export default async function PortfolioPage({ params, searchParams }: Props) {
                 memberId={membership.memberId}
                 portfolioName={portfolio.name}
                 ownerName={membership.ownerName}
-                className={`${outlineButton} bg-white px-4 py-2 dark:bg-transparent`}
               />
             )}
           </div>
@@ -228,12 +253,12 @@ export default async function PortfolioPage({ params, searchParams }: Props) {
           </h2>
           <p className="mx-auto mt-3 max-w-md text-sm leading-6 text-zinc-500 dark:text-zinc-400">
             {canEdit
-              ? 'Enter a position with its ticker, share count, and average cost. Then write down why it’s held: the claim, what has to stay true, and what could go wrong.'
+              ? 'A stock or fund, crypto, gold or silver, or cash. Then write down why it’s held: the claim, what has to stay true, and what could go wrong.'
               : 'Holdings will appear here when the owner adds them.'}
           </p>
           {canEdit && (
             <div className="mt-7">
-              <HoldingDialog portfolioId={portfolio.id} today={today} triggerLabel="Add a holding" />
+              <AddHoldingDialog portfolioId={portfolio.id} today={today} assetTypes={assetTypes} cashLines={cashLines} />
             </div>
           )}
         </div>
@@ -251,27 +276,66 @@ export default async function PortfolioPage({ params, searchParams }: Props) {
                   thesisTab="theses"
                   totalsFooter={<LiveRefresh renderedAt={view.fetchedAt} />}
                   researchBase={APP_RESEARCH}
+                  canAddCash={canEdit}
+                  cashControls={
+                    canEdit ? (
+                      <>
+                        <CashDialog portfolioId={portfolio.id} direction="in" cashLines={cashLines} today={today} />
+                        <CashDialog portfolioId={portfolio.id} direction="out" cashLines={cashLines} today={today} />
+                      </>
+                    ) : undefined
+                  }
+                  holdingHistory={{ ...view.holdingHistory, me: user.id, canEdit }}
                 />
               ),
             },
             {
               id: 'theses',
               label: 'Theses',
-              badge: `${withThesis} of ${holdings.length}`,
-              content: <ThesisList holdings={holdings} actions={thesisActions} />,
+              badge: `${withThesis} of ${invested.length}`,
+              content: <ThesisList holdings={invested} actions={thesisActions} />,
             },
             // The assistant and its conversation stay with the owner.
             ...(!isOwner ? [] : [{
               id: 'assistant',
               label: 'Assistant',
-              badge: messages.length > 0 ? String(messages.length) : undefined,
+              badge:
+                chatState.chats.length === 0
+                  ? undefined
+                  : chatState.available
+                    ? chatState.chats.length === 1
+                      ? '1 chat'
+                      : `${chatState.chats.length} chats`
+                    : String(chatState.chats[0].messages.length),
               content: (
                 <AssistantPanel
                   portfolioId={portfolio.id}
-                  messages={messages.map((m) => ({
-                    id: m.id,
-                    role: m.role === 'assistant' ? 'assistant' : 'user',
-                    content: m.content,
+                  portfolioName={portfolio.name}
+                  actionContext={{
+                    portfolioId: portfolio.id,
+                    today,
+                    assetTypes,
+                    cashLines,
+                    // What a change card can buy more of, sell, or remove.
+                    holdings: invested.map((h) => ({
+                      id: h.id,
+                      ticker: h.ticker,
+                      assetClass: h.assetClass,
+                      quantity: h.quantity,
+                      costBasis: h.costBasis,
+                      openedAt: h.openedAt,
+                    })),
+                  }}
+                  multiChat={chatState.available}
+                  chats={chatState.chats.map((chat) => ({
+                    id: chat.id,
+                    title: chat.title,
+                    at: chat.updatedAt,
+                    messages: chat.messages.map((m) => ({
+                      id: m.id,
+                      role: m.role === 'assistant' ? 'assistant' : 'user',
+                      content: m.content,
+                    })),
                   }))}
                   hasHoldings={holdings.length > 0}
                   purpose={hasPurpose ? portfolio.mandate : null}
@@ -293,15 +357,6 @@ export default async function PortfolioPage({ params, searchParams }: Props) {
         <AskOnArrival question={arrivingQuestion} />
       )}
 
-      {isOwner && (
-        <div className="flex justify-end pt-2">
-          <DeletePortfolioButton
-            portfolioId={portfolio.id}
-            name={portfolio.name}
-            holdingCount={holdings.length}
-          />
-        </div>
-      )}
     </div>
   )
 }

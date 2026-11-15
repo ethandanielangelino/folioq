@@ -21,11 +21,14 @@ export default function Delta({
   ratio,
   className = '',
   showIcon = true,
+  stacked = false,
 }: {
   amount: number | null
   ratio?: number | null
   className?: string
   showIcon?: boolean
+  /** The percentage under the amount rather than beside it, for narrow table columns. */
+  stacked?: boolean
 }) {
   const money = useMoney()
   if (amount === null) {
@@ -36,7 +39,9 @@ export default function Delta({
   const Icon = dir === 'up' ? ArrowUpRight : dir === 'down' ? ArrowDownRight : Minus
 
   return (
-    <span className={`inline-flex items-center gap-1 whitespace-nowrap ${tone[dir]} ${className}`}>
+    <span
+      className={`inline-flex whitespace-nowrap ${stacked ? 'flex-col items-end' : 'items-center gap-1'} ${tone[dir]} ${className}`}
+    >
       {showIcon && (
         <>
           <Icon className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
@@ -44,7 +49,9 @@ export default function Delta({
         </>
       )}
       <span>{formatSignedMoney(amount, money)}</span>
-      {ratio !== null && ratio !== undefined && <span>({formatSignedPercent(ratio)})</span>}
+      {ratio !== null && ratio !== undefined && (
+        <span className={stacked ? 'text-xs' : ''}>({formatSignedPercent(ratio)})</span>
+      )}
     </span>
   )
 }

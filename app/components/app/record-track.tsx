@@ -16,8 +16,8 @@ const bar = {
 const word = { done: 'done', partial: 'in progress', todo: 'not started' } as const
 
 /**
- * How complete a portfolio's record is: one segment each for its holdings,
- * its theses, and its share link.
+ * How complete a portfolio's record is: one segment each for its holdings
+ * and its theses.
  */
 export default function RecordTrack({ parts }: { parts: RecordPart[] }) {
   return (
@@ -25,9 +25,13 @@ export default function RecordTrack({ parts }: { parts: RecordPart[] }) {
       className="grid gap-2"
       style={{ gridTemplateColumns: `repeat(${parts.length}, minmax(0, 1fr))` }}
     >
-      {parts.map((part) => (
+      {parts.map((part, index) => (
         <li key={part.label}>
-          <span aria-hidden="true" className={`block h-1.5 rounded-full ${bar[part.state]}`} />
+          <span
+            aria-hidden="true"
+            className={`block h-1.5 rounded-full ${bar[part.state]} ${part.state === 'todo' ? '' : 'bar-grow'}`}
+            style={{ animationDelay: `${index * 90}ms` }}
+          />
           <span className="mt-2 flex items-start gap-1.5 text-xs leading-4">
             <span
               aria-hidden="true"

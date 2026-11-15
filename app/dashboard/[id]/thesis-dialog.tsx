@@ -108,8 +108,12 @@ export default function ThesisDialog({
         setError(result.error)
         return
       }
-      setOpen(false)
-      toast(`Thesis for ${ticker} saved`)
+      // Close (and confirm) in the same transition as the refreshed page, so the
+      // dialog stays on its saving state until the new numbers are showing.
+      startSave(() => {
+        setOpen(false)
+        toast(`Thesis for ${ticker} saved`)
+      })
     })
   }
 
@@ -145,6 +149,15 @@ export default function ThesisDialog({
           <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-zinc-100 px-4 py-3 dark:bg-zinc-800">
             <p className="max-w-[18rem] text-xs leading-5 text-zinc-600 dark:text-zinc-300">
               Stuck? Get a first draft from AI, then rewrite it until it is your reasoning.
+              {aiDraft && (
+                <span className="mt-1 block">
+                  Drafted by Google&apos;s Gemini from this holding&apos;s figures and, for a listed company,{' '}
+                  <a href="https://finnhub.io" target="_blank" rel="noopener noreferrer" className="underline underline-offset-2">
+                    Finnhub
+                  </a>
+                  &apos;s company profile and recent headlines. It can be wrong; check it.
+                </span>
+              )}
             </p>
             <button
               type="button"

@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useSyncExternalStore, useTransition } from 'react'
-import { Eye, Globe, Lock, Pencil, UserRoundPlus, X } from 'lucide-react'
+import { Eye, Globe, Lock, Pencil, UserRoundPlus } from 'lucide-react'
 import {
   inviteMember,
   lookupShareCode,
@@ -9,6 +9,7 @@ import {
   setMemberRole,
   setSharing,
 } from '@/app/dashboard/actions'
+import BinButton from '@/app/components/bin-button'
 import { errorText, field, outlineButton, primaryButton } from '@/app/components/styles'
 import { useToast } from '@/app/components/toast'
 import {
@@ -30,20 +31,82 @@ function useOrigin(): string {
   )
 }
 
-const roles: { value: MemberRole; label: string; detail: string; Icon: typeof Eye }[] = [
+const roles: { value: MemberRole; label: string; short: string; detail: string; Icon: typeof Eye }[] = [
   {
     value: 'viewer',
     label: 'View only',
+    short: 'View',
     detail: 'Sees holdings, values, and every thesis. Can’t change anything.',
     Icon: Eye,
   },
   {
     value: 'editor',
     label: 'Editor',
+    short: 'Edit',
     detail: 'Can also add, change, and remove holdings and theses. You see their changes as they make them.',
     Icon: Pencil,
   },
 ]
+
+/**
+ * The two-way switch beside each person: an eye for "can look", a pencil for
+ * "can change". Both choices are always visible, so nobody has to open a
+ * menu to find out what the options are.
+ */
+function RoleSwitch({
+  name,
+  value,
+  disabled,
+  onChange,
+}: {
+  name: string
+  value: MemberRole
+  disabled: boolean
+  onChange: (next: MemberRole) => void
+}) {
+  const editing = value === 'editor'
+  return (
+    <div
+      role="radiogroup"
+      aria-label={`What ${name} can do`}
+      className="relative grid shrink-0 grid-cols-2 rounded-full bg-black/[.06] p-0.5 dark:bg-white/[.08]"
+    >
+      {/* The raised pill slides to the chosen side; only its position animates. */}
+      <span
+        aria-hidden="true"
+        className={`absolute inset-y-0.5 left-0.5 w-[calc(50%-0.125rem)] rounded-full bg-white shadow-sm transition-transform duration-250 ease-[cubic-bezier(0.22,0.8,0.24,1)] dark:bg-zinc-950 ${
+          editing ? 'translate-x-full' : 'translate-x-0'
+        }`}
+      />
+      {roles.map(({ value: option, short, label, detail, Icon }) => {
+        const active = option === value
+        return (
+          <button
+            key={option}
+            type="button"
+            role="radio"
+            aria-checked={active}
+            aria-label={label}
+            title={`${label}: ${detail}`}
+            disabled={disabled}
+            onClick={() => onChange(option)}
+            className={`relative z-10 flex items-center justify-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium transition-colors duration-200 disabled:cursor-not-allowed ${
+              active
+                ? 'text-mint-800 dark:text-mint-200'
+                : 'text-zinc-600 hover:text-black dark:text-zinc-400 dark:hover:text-zinc-50'
+            }`}
+          >
+            <Icon
+              className={`h-3.5 w-3.5 transition-transform duration-250 ${active ? 'scale-110' : 'scale-100'}`}
+              aria-hidden="true"
+            />
+            {short}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
 
 const choice = (active: boolean) =>
   `flex w-full items-start gap-3 rounded-2xl border px-4 py-3 text-left transition-colors ${
@@ -176,7 +239,7 @@ export default function ShareDialog({
       <DialogContent className="max-h-[90dvh] gap-0 overflow-y-auto rounded-3xl border border-black/[.08] bg-white p-7 ring-0 sm:max-w-lg dark:border-white/[.08] dark:bg-zinc-900">
         {found ? (
           /* ------------------------------------------------ confirm step */
-          <>
+          <div key="confirm" className="rise-in">
             <DialogTitle className="text-2xl text-black dark:text-zinc-50">
               Share with {found.name}?
             </DialogTitle>
@@ -236,10 +299,10 @@ export default function ShareDialog({
                 {pending ? 'Sending…' : `Share with ${found.name}`}
               </button>
             </div>
-          </>
+          </div>
         ) : (
           /* ---------------------------------------------------- main view */
-          <>
+          <div key="main" className="rise-in">
             <DialogTitle className="text-2xl text-black dark:text-zinc-50">
               Share {portfolioName}
             </DialogTitle>
@@ -270,7 +333,7 @@ export default function ShareDialog({
                       id="share-code"
                       value={code}
                       onChange={(e) => setCode(e.target.value)}
-                      placeholder="Their share ID, e.g. FQ-7K3M-9X2P"
+                      placeholder="Their share ID"
                       autoComplete="off"
                       spellCheck={false}
                       maxLength={20}
@@ -285,51 +348,50 @@ export default function ShareDialog({
                     </button>
                   </form>
                   <p className="mt-2 text-xs leading-5 text-zinc-500 dark:text-zinc-400">
-                    They&apos;ll find it under Account in their own FolioQ. You confirm who it is
-                    before anything is shared.
+                    It looks like <span className="font-mono">FQ-7K3M-9X2P</span>. They&apos;ll find
+                    it under Account in their own FolioQ. You confirm who it is before anything is
+                    shared.
                   </p>
 
                   {count > 0 && (
                     <ul className="mt-4 divide-y divide-black/[.06] rounded-2xl border border-black/[.08] dark:divide-white/[.08] dark:border-white/[.1]">
                       {people.map((person) => (
-                        <li key={person.memberId} className="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3">
-                          <span className="min-w-0 flex-1 basis-40">
+                        <li key={person.memberId} className="rise-in flex flex-wrap items-center gap-x-3 gap-y-2.5 px-4 py-3 sm:flex-nowrap">
+                          <span
+                            aria-hidden="true"
+                            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-mint-600/[.14] text-sm font-medium text-mint-800 dark:bg-mint-400/[.16] dark:text-mint-200"
+                          >
+                            {person.name.trim().charAt(0).toUpperCase() || '?'}
+                          </span>
+                          <span className="min-w-0 flex-1 basis-32 sm:basis-0">
                             <span className="block truncate text-sm font-medium text-black dark:text-zinc-50">
                               {person.name}
                             </span>
-                            <span className="block text-xs text-zinc-500 dark:text-zinc-400">
+                            {/* One line, so the row keeps its height while the bin opens. */}
+                            <span className="block truncate text-xs text-zinc-500 dark:text-zinc-400">
                               {person.status === 'pending'
                                 ? `Invited, ${person.left} left to accept`
-                                : 'Has access'}
+                                : person.role === 'editor'
+                                  ? 'Can view and edit'
+                                  : 'Can view only'}
                             </span>
                           </span>
-                          <label className="sr-only" htmlFor={`role-${person.memberId}`}>
-                            What {person.name} can do
-                          </label>
-                          <select
-                            id={`role-${person.memberId}`}
+                          <RoleSwitch
+                            name={person.name}
                             value={person.role}
                             disabled={pending}
-                            onChange={(e) => changeRole(person, e.target.value as MemberRole)}
-                            className="h-9 rounded-full border border-black/[.1] bg-white px-3 text-sm text-black dark:border-white/[.15] dark:bg-zinc-900 dark:text-zinc-50"
-                          >
-                            <option value="viewer">View only</option>
-                            <option value="editor">Editor</option>
-                          </select>
-                          <button
-                            type="button"
-                            onClick={() => remove(person)}
-                            disabled={pending}
-                            aria-label={
+                            onChange={(next) => changeRole(person, next)}
+                          />
+                          <BinButton
+                            label={person.status === 'pending' ? 'Withdraw' : 'Remove'}
+                            description={
                               person.status === 'pending'
                                 ? `Withdraw the invite to ${person.name}`
                                 : `Remove ${person.name}’s access`
                             }
-                            title={person.status === 'pending' ? 'Withdraw invite' : 'Remove access'}
-                            className="flex h-9 w-9 items-center justify-center rounded-full text-zinc-500 transition-colors hover:bg-red-600/10 hover:text-red-700 dark:text-zinc-400 dark:hover:text-red-400"
-                          >
-                            <X className="h-4 w-4" aria-hidden="true" />
-                          </button>
+                            onClick={() => remove(person)}
+                            disabled={pending}
+                          />
                         </li>
                       ))}
                     </ul>
@@ -416,7 +478,7 @@ export default function ShareDialog({
                 {error}
               </p>
             )}
-          </>
+          </div>
         )}
       </DialogContent>
     </Dialog>

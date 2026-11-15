@@ -25,13 +25,14 @@ const limits = [
     detail: 'You enter each position yourself. Nothing is imported, and nothing is ever ordered.',
   },
   {
-    term: 'It covers US-listed stocks and ETFs.',
-    detail: 'Prices come from Finnhub and are shown in US dollars.',
+    term: 'It covers US-listed stocks and funds, crypto, gold and silver, and cash.',
+    detail:
+      'Shares and funds are priced by Finnhub, crypto by Coinbase, gold and silver by gold-api.com, and cash at the exchange rate. Shares listed outside the US and mutual funds aren’t covered.',
   },
   {
     term: 'It tracks positions, not transactions.',
     detail:
-      'You keep each holding’s share count and average cost up to date. Individual trades, cash, dividends, and fees are not recorded, so gain means price gain on what you hold now.',
+      'You keep each holding’s quantity and average cost up to date. Record a sale with Sell and the money moves into the portfolio’s cash, so you always see what is invested and what is cash. Individual trades, dividends, and fees are not kept as a history, so gain means price gain on what you hold now.',
   },
   {
     term: 'History starts when you do.',

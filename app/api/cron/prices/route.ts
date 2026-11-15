@@ -1,6 +1,7 @@
 import { timingSafeEqual } from 'node:crypto'
 import { savePrices } from '@/lib/data'
-import { getQuotes } from '@/lib/finnhub'
+import { getAssetQuotes } from '@/lib/asset-prices'
+import { toAssetClass } from '@/lib/assets'
 import { createAdminClient } from '@/lib/supabase/admin'
 
 // Nightly job: stores the closing price of every held ticker in `prices`, so
@@ -31,14 +32,21 @@ export async function GET(request: Request) {
     return Response.json({ error: 'Service role key is not configured' }, { status: 500 })
   }
 
-  const { data, error } = await admin.from('holdings').select('ticker')
+  // Every column, so this works whether or not supabase/assets.sql has added asset_class.
+  const { data, error } = await admin.from('holdings').select('*')
   if (error) {
     return Response.json({ error: 'Could not read holdings' }, { status: 500 })
   }
 
-  const tickers = [...new Set((data ?? []).map((row) => row.ticker as string))]
-  const quotes = await getQuotes(tickers)
+  const items = (data ?? []).map((row) => ({
+    ticker: String(row.ticker),
+    assetClass: toAssetClass(row.asset_class),
+  }))
+  // Crypto, gold, and cash have no closing bell: the price at the time this
+  // runs is filed as that day's close, the same day the stocks' close is.
+  const quotes = await getAssetQuotes(items)
+  const wanted = Object.keys(quotes).length
   const saved = await savePrices(quotes)
 
-  return Response.json({ tickers: tickers.length, saved, missing: tickers.length - saved })
+  return Response.json({ prices: wanted, saved, missing: wanted - saved })
 }

@@ -104,6 +104,21 @@ export function finalizeAnswer(raw: string, available: AssistantSource[]): strin
   let body = raw.replace(/\r\n/g, '\n').trim()
   body = body.replace(OWN_LIST, '').trimEnd()
 
+  // "[1, 2]", "[1,3]" and "[1-3]" become "[1][2]" and so on, so every source is seen.
+  body = body.replace(/\[(\d+(?:\s*(?:,|–|-|and)\s*\d+)+)\]/g, (_whole, inside: string) => {
+    const numbers: number[] = []
+    for (const part of inside.split(/\s*(?:,|and)\s*/)) {
+      const range = part.match(/^(\d+)\s*[–-]\s*(\d+)$/)
+      if (range) {
+        const [from, to] = [Number(range[1]), Number(range[2])]
+        for (let n = from; n <= to && n - from < 20; n++) numbers.push(n)
+      } else if (/^\d+$/.test(part.trim())) {
+        numbers.push(Number(part))
+      }
+    }
+    return numbers.map((n) => `[${n}]`).join('')
+  })
+
   const byNumber = new Map(available.map((s) => [s.n, s]))
   const order: number[] = []
   body.replace(/\[(\d+)\]/g, (whole, digits: string) => {

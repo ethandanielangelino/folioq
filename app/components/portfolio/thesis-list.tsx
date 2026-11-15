@@ -15,7 +15,7 @@ function Provenance({ thesis }: { thesis: Thesis }) {
         'Written by the owner.'
       ) : (
         <span className="font-medium text-zinc-800 dark:text-zinc-200">
-          AI draft, saved without changes.
+          AI draft (Google&apos;s Gemini), saved without changes.
         </span>
       )}
     </p>
