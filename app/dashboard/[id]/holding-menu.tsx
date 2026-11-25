@@ -18,6 +18,7 @@ import { classifyTicker, deleteHolding, updateHolding, type Classification } fro
 import { CurrencySelect, moneyCurrencies } from '@/app/dashboard/[id]/amount-choice'
 import { currencyName } from '@/app/dashboard/[id]/cash-choice'
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog'
+import { ExchangePicker } from '@/app/dashboard/[id]/trade-time'
 import { LISTED_GROUPS, METALS, allowedGroups, assetLabel, kindOf, unitName, type AssetClass } from '@/lib/assets'
 
 export interface MenuHolding {
@@ -27,6 +28,8 @@ export interface MenuHolding {
   quantity: number
   costBasis: number | null
   openedAt: string
+  /** The exchange a coin is priced on, or null for the automatic choice. */
+  venue?: string | null
 }
 
 type Mode = 'details' | 'fix' | 'delete'
@@ -138,6 +141,7 @@ function HoldingEditDialog({
   const name = nameOf(holding)
   const [group, setGroup] = useState<AssetClass>(holding.assetClass)
   const [openedAt, setOpenedAt] = useState(holding.openedAt)
+  const [exchange, setExchange] = useState(holding.venue ?? '')
   const [quantity, setQuantity] = useState(String(holding.quantity))
   const shownCost = holding.costBasis !== null ? String(Math.round(holding.costBasis * 10000) / 10000) : ''
   const [cost, setCost] = useState(shownCost)
@@ -163,6 +167,7 @@ function HoldingEditDialog({
     const form = new FormData()
     form.set('opened_at', openedAt)
     if (kind === 'listed') form.set('asset_class', group)
+    if (kind === 'crypto' && !fix && exchange !== (holding.venue ?? '')) form.set('exchange', exchange)
     if (fix) {
       form.set('fix', 'on')
       form.set('quantity', quantity)
@@ -295,6 +300,16 @@ function HoldingEditDialog({
                   className={field}
                 />
               </div>
+            )}
+
+            {mode === 'details' && kind === 'crypto' && (
+              <ExchangePicker
+                id={`${uid}-exchange`}
+                coin={holding.ticker}
+                value={exchange}
+                onChange={setExchange}
+                label="Exchange it’s priced on"
+              />
             )}
 
             {mode === 'fix' && (

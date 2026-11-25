@@ -21,13 +21,15 @@ import {
   useRate,
   type CashLine,
 } from '@/app/dashboard/[id]/cash-choice'
+import { PurposeField } from '@/app/dashboard/[id]/cash-dialog'
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
 import type { SymbolMatch } from '@/lib/finnhub'
 import { LISTED_GROUPS, METALS, allowedGroups, assetLabel, kindOf, type AssetClass, type AssetKind } from '@/lib/assets'
 import type { ChatAction } from '@/lib/chat-actions'
 import { CURRENCIES, USD } from '@/lib/currency'
 import type { DatedPrice } from '@/lib/dated-price'
-import { formatDate, formatDayDate, formatMoney, formatShares } from '@/lib/format'
+import { formatDate, formatMoney, formatShares } from '@/lib/format'
+import { cleanPurpose } from '@/lib/history'
 import { cashCovers, unitsForMoney } from '@/lib/portfolio'
 import {
   CurrencySelect,
@@ -38,10 +40,22 @@ import {
   shownPrice,
   type EnterBy,
 } from '@/app/dashboard/[id]/amount-choice'
+import {
+  ExchangePicker,
+  MarketPicker,
+  MomentRange,
+  TimeField,
+  aheadOfNewYork,
+  basisWords,
+  inFuture,
+  momentOf,
+  useLatestDate,
+} from '@/app/dashboard/[id]/trade-time'
+import { US_MARKET, cryptoVenue, stockMarket } from '@/lib/venues'
 
 /** The four kinds of holding, as they are offered when adding one. */
 const KINDS: { kind: AssetKind; label: string; hint: string; Icon: typeof ChartLine }[] = [
-  { kind: 'listed', label: 'Stock or fund', hint: 'Listed in the US', Icon: ChartLine },
+  { kind: 'listed', label: 'Stock or fund', hint: 'US and 40 other markets', Icon: ChartLine },
   { kind: 'crypto', label: 'Crypto', hint: 'BTC, ETH and more', Icon: Bitcoin },
   { kind: 'metal', label: 'Gold or silver', hint: 'Metal you own', Icon: Gem },
   { kind: 'cash', label: 'Cash', hint: 'Savings, any currency', Icon: Banknote },
@@ -50,6 +64,24 @@ const KINDS: { kind: AssetKind; label: string; hint: string; Icon: typeof ChartL
 const POPULAR_COINS = ['BTC', 'ETH', 'SOL', 'XRP']
 type How = 'bought' | 'owned'
 type Quote = { status: 'idle' } | { status: 'loading' } | { status: 'done'; asked: string; result: DatedPrice }
+
+/** Everything the price depends on. */
+interface Ask {
+  ticker: string
+  assetClass: AssetClass
+  openedAt: string
+  how: How | null
+  /** The stock market (listed only). */
+  market: string
+  /** The exchange a coin was bought on ('' for automatic). */
+  exchange: string
+  /** The time of day it filled, HH:MM in the person's time zone ('' for none). */
+  fillTime: string
+}
+
+/** One key per price asked for, so an answer for an older question is never shown. */
+const askKey = (a: Ask) =>
+  [a.assetClass, a.ticker.trim().toUpperCase(), a.openedAt, a.market, a.exchange, momentOf(a.openedAt, a.fillTime) ?? ''].join('|')
 
 const card = (active: boolean) =>
   `flex items-center gap-3 rounded-2xl border px-3.5 py-3 text-left transition-[border-color,background-color] duration-200 disabled:cursor-not-allowed disabled:opacity-40 ${
@@ -126,6 +158,11 @@ export function AddHoldingForm({
   const [how, setHow] = useState<How | null>(startHow)
   const [quantity, setQuantity] = useState(initial?.quantity ? String(initial.quantity) : '')
   const [openedAt, setOpenedAt] = useState(initial?.date ?? today)
+  const [marketId, setMarketId] = useState(US_MARKET.id)
+  const [exchange, setExchange] = useState('')
+  const [fillTime, setFillTime] = useState('')
+  // Cash: where it came from.
+  const [source, setSource] = useState('')
   const [cost, setCost] = useState(initial?.cost ? String(initial.cost.amount) : '')
   const [costCurrency, setCostCurrency] = useState(initial?.cost?.currency ?? 'USD')
   const [payChoice, setPayChoice] = useState<string | null>(initial?.payFrom ?? null)
@@ -145,14 +182,24 @@ export function AddHoldingForm({
   const isCash = kind === 'cash'
   const bought = !isCash && how === 'bought'
   const symbol = ticker.trim().toUpperCase()
-  const found = listing?.ticker === symbol ? listing.found : null
+  const listingKey = `${marketId}|${symbol}`
+  const found = listing?.ticker === listingKey ? listing.found : null
+  const stock = stockMarket(marketId) ?? US_MARKET
+  const venue = kind === 'crypto' ? cryptoVenue(exchange) : null
+  // A time is taken for a purchase (to price it) and for something already owned (to show the market price then).
+  const moment = !isCash && how !== null ? momentOf(openedAt, fillTime) : null
+  const timeInFuture = inFuture(moment)
+  // With a time, the date may be the person's own, a day ahead of New York.
+  const latest = useLatestDate(today)
+  const needsTime = openedAt > today && !moment
   const groups = kind === 'listed' && found ? allowedGroups(found.type) : null
 
   // Paying for a purchase from cash.
   const payFrom = payChoice ?? defaultPayFrom(cashLines, display)
   const paying = bought && payFrom !== OUTSIDE
   const rate = useRate(paying ? payFrom : null, openedAt)
-  const priceKeyNow = `${assetClass}|${symbol}|${openedAt}`
+  const current: Ask = { ticker, assetClass, openedAt, how, market: marketId, exchange, fillTime }
+  const priceKeyNow = askKey(current)
   const market = quote.status === 'done' && quote.asked === priceKeyNow && quote.result.ok ? quote.result : null
   const noMarketPrice = quote.status === 'done' && quote.asked === priceKeyNow && !quote.result.ok
   const typed = Number(manualPrice)
@@ -179,6 +226,24 @@ export function AddHoldingForm({
   const line = cashLines.find((l) => l.currency === payFrom)
   const shortOfCash = costInCash !== null && !cashCovers(line?.amount ?? 0, costInCash)
 
+  // Already owned: the market price then, in the average cost's currency, to fill the cost in with.
+  const costRate = useRate(!isCash && !bought && costCurrency !== 'USD' ? costCurrency : null, openedAt)
+  const marketCost = !market
+    ? null
+    : market.quoted?.currency === costCurrency
+      ? market.quoted.price
+      : costCurrency === 'USD'
+        ? market.price
+        : typeof costRate === 'number'
+          ? market.price * costRate
+          : null
+  const roundedCost = marketCost === null ? null : String(Number(marketCost.toPrecision(8)))
+  const costIsMarket = roundedCost !== null && cost === roundedCost
+
+  function fillCostFromMarket() {
+    if (roundedCost !== null) setCost(roundedCost)
+  }
+
   const label = isCash
     ? 'Cash'
     : kind === 'listed'
@@ -192,6 +257,8 @@ export function AddHoldingForm({
     qty > 0 &&
     (isCash || how !== null) &&
     (kind !== 'listed' || found !== null) &&
+    !timeInFuture &&
+    !needsTime &&
     (!bought || (price !== null && (!paying || (costInCash !== null && !shortOfCash))))
 
   function later(name: string, wait: number, run: () => void) {
@@ -206,7 +273,7 @@ export function AddHoldingForm({
     if (kindOf(startClass) === 'listed') lookUpListing(sym)
     if (startHow === 'bought' && kindOf(startClass) !== 'cash') {
       const ticket = ++asked.current.price
-      const key = `${startClass}|${sym}|${initial?.date ?? today}`
+      const key = askKey({ ...current, ticker: sym, assetClass: startClass, openedAt: initial?.date ?? today })
       later('price', 0, async () => {
         const result = await getPriceOn(sym, startClass, initial?.date ?? today)
         if (ticket === asked.current.price) setQuote({ status: 'done', asked: key, result })
@@ -216,32 +283,66 @@ export function AddHoldingForm({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  function lookUpPrice(next: { ticker: string; assetClass: AssetClass; openedAt: string; how: How | null }, wait = 450) {
+  /** Looks the price up again after a change; `changes` are the values just changed, the rest are as they are. */
+  function lookUpPrice(changes: Partial<Ask>, wait = 450) {
+    const next = { ...current, ...changes }
     const ticket = ++asked.current.price
     setManualPrice('')
-    if (next.how !== 'bought' || kindOf(next.assetClass) === 'cash' || !next.ticker.trim() || !next.openedAt) {
+    const at = momentOf(next.openedAt, next.fillTime)
+    if (
+      next.how === null ||
+      kindOf(next.assetClass) === 'cash' ||
+      !next.ticker.trim() ||
+      !next.openedAt ||
+      inFuture(at) ||
+      (next.openedAt > today && !at)
+    ) {
       setQuote({ status: 'idle' })
       return
     }
     setQuote({ status: 'loading' })
-    const key = `${next.assetClass}|${next.ticker.trim().toUpperCase()}|${next.openedAt}`
+    const key = askKey(next)
     later('price', wait, async () => {
-      const result = await getPriceOn(next.ticker, next.assetClass, next.openedAt)
+      const result = await getPriceOn(next.ticker, next.assetClass, next.openedAt, {
+        at,
+        exchange: kindOf(next.assetClass) === 'crypto' ? next.exchange : null,
+        market: kindOf(next.assetClass) === 'listed' ? next.market : null,
+      })
       if (ticket === asked.current.price) setQuote({ status: 'done', asked: key, result })
     })
   }
 
   /** What the ticker is (company, REIT, fund) decides its label and the groups it may go in. */
-  function lookUpListing(value: string) {
+  function lookUpListing(value: string, on = marketId) {
     const ticket = ++asked.current.listing
     const sym = value.trim().toUpperCase()
     if (!sym) return
     later('listing', 450, async () => {
-      const result = await classifyTicker(sym)
+      const result = await classifyTicker(sym, on)
       if (ticket !== asked.current.listing) return
-      setListing({ ticker: sym, found: result })
+      setListing({ ticker: `${on}|${sym}`, found: result })
       setAssetClass(result.suggested)
     })
+  }
+
+  /** Ticker suggestions on the market chosen. */
+  function search(query: string, on = marketId) {
+    if (!query.trim()) return setMatches([])
+    const ticket = ++asked.current.search
+    later('search', 250, async () => {
+      const results = await suggestSymbols(query.trim(), on)
+      if (ticket === asked.current.search) setMatches(results)
+    })
+  }
+
+  function changeMarket(next: string) {
+    setMarketId(next)
+    setError('')
+    setMatches([])
+    if (!symbol) return
+    lookUpListing(symbol, next)
+    search(symbol, next)
+    lookUpPrice({ market: next })
   }
 
   function chooseKind(next: AssetKind) {
@@ -264,13 +365,7 @@ export function AddHoldingForm({
     lookUpPrice({ ticker: upper, assetClass, openedAt, how })
     if (kind !== 'listed') return
     lookUpListing(upper)
-    const query = value.trim()
-    if (!query) return setMatches([])
-    const ticket = ++asked.current.search
-    later('search', 250, async () => {
-      const results = await suggestSymbols(query)
-      if (ticket === asked.current.search) setMatches(results)
-    })
+    search(value)
   }
 
   function onSubmit(event: React.FormEvent) {
@@ -279,6 +374,9 @@ export function AddHoldingForm({
     form.set('asset_class', assetClass)
     form.set('ticker', symbol)
     form.set('opened_at', openedAt)
+    if (kind === 'listed') form.set('market', marketId)
+    if (kind === 'crypto' && exchange) form.set('exchange', exchange)
+    if (moment) form.set('traded_at', moment)
     if (bought && byMoney) {
       // The server works out how many, at the price it records.
       form.set('spend', spend)
@@ -287,6 +385,7 @@ export function AddHoldingForm({
       form.set('quantity', byMoney ? String(qty) : quantity)
     }
     if (!isCash) form.set('how', how ?? 'owned')
+    else form.set('purpose', source)
     if (bought) {
       if (paying) form.set('pay_from', payFrom)
       if (noMarketPrice) form.set('manual_price', manualPrice)
@@ -304,22 +403,35 @@ export function AddHoldingForm({
     })
   }
 
-  const what = isCash ? `${currencyName(symbol)} cash` : kind === 'metal' ? (METALS[symbol] ?? symbol) : symbol
+  const what = isCash
+    ? `${currencyName(symbol)} cash`
+    : kind === 'metal'
+      ? (METALS[symbol] ?? symbol)
+      : kind === 'listed' && stock.suffix
+        ? `${symbol} (${stock.name})`
+        : symbol
+  const onVenue = venue ? ` on ${venue.name}` : ''
+  const atTime = moment
+    ? ` at ${new Date(moment).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}`
+    : ''
 
   /** What will be (or was) recorded, in words, for the chat. */
   function describe(tense: 'future' | 'past'): string {
     const verb = tense === 'future' ? 'Add' : 'Added'
-    if (isCash) return `${verb} ${inOwn(qty, symbol)} as ${currencyName(symbol)} cash, held since ${day(openedAt)}.`
+    if (isCash) {
+      const from = cleanPurpose(source)
+      return `${verb} ${inOwn(qty, symbol)} as ${currencyName(symbol)} cash, held since ${day(openedAt)}.${from ? ` From: ${from}.` : ''}`
+    }
     const units = kind === 'listed' ? 'shares' : kind === 'metal' ? 'oz' : 'coins'
     const amount = byMoney && bought ? `${inOwn(spent, spendCurrency)} of ${what}` : `${formatShares(qty)} ${units === 'coins' ? what : `${units} of ${what}`}`
     if (bought) {
       const each = market ? ` at ${shownPrice(market, money)} each` : price !== null ? ` at ${formatMoney(price, USD)} each` : ''
       const paid = paying ? `, paid from ${currencyName(payFrom)} cash` : ', paid with money from outside FolioQ'
       const about = byMoney && qty > 0 ? ` (about ${formatShares(qty)} ${units})` : ''
-      return `${verb} ${amount}${about}, bought ${openedAt === today ? 'today' : `on ${day(openedAt)}`}${each}${paid}.`
+      return `${verb} ${amount}${about}, bought${onVenue} ${openedAt === today ? 'today' : `on ${day(openedAt)}`}${atTime}${each}${paid}.`
     }
     const costText = Number(cost) > 0 ? ` at an average cost of ${inOwn(Number(cost), costCurrency)}` : ', with no cost recorded'
-    return `${verb} ${amount}, already owned since ${day(openedAt)}${costText}.`
+    return `${verb} ${amount}${onVenue}, already owned since ${day(openedAt)}${costText}.`
   }
 
   const words = {
@@ -372,20 +484,21 @@ export function AddHoldingForm({
           {kindChosen && (
           <div key={`fields-${kind}`} className="rise-in flex flex-col gap-5">
             {/* What it is: a ticker, a coin, gold or silver, or a currency. */}
+            {kind === 'listed' && <MarketPicker id={`${uid}-market`} value={marketId} onChange={changeMarket} />}
             {kind === 'listed' && (
               <div className="flex flex-col gap-2">
                 <label htmlFor={`${uid}-ticker`} className={fieldLabel}>
-                  Ticker
+                  Ticker{stock.suffix ? ` on ${stock.name}` : ''}
                 </label>
                 <input
                   id={`${uid}-ticker`}
                   name="ticker"
                   required
-                  maxLength={12}
+                  maxLength={15}
                   value={ticker}
                   onChange={(e) => changeTicker(e.target.value)}
                   list={`${uid}-matches`}
-                  placeholder="AAPL"
+                  placeholder={stock.example}
                   autoComplete="off"
                   autoCapitalize="characters"
                   spellCheck={false}
@@ -398,6 +511,12 @@ export function AddHoldingForm({
                     </option>
                   ))}
                 </datalist>
+                {stock.suffix && (
+                  <p className="text-xs leading-5 text-zinc-500 dark:text-zinc-400">
+                    The code or name as {stock.name.split(' (')[0]} lists it, like {stock.example}. Priced from Yahoo Finance in{' '}
+                    {stock.currency} and converted at the exchange rate.
+                  </p>
+                )}
               </div>
             )}
 
@@ -428,6 +547,19 @@ export function AddHoldingForm({
                   ))}
                 </div>
               </div>
+            )}
+            {kind === 'crypto' && (
+              <ExchangePicker
+                id={`${uid}-exchange`}
+                coin={symbol}
+                value={exchange}
+                onChange={(next) => {
+                  setExchange(next)
+                  setError('')
+                  lookUpPrice({ exchange: next }, 0)
+                }}
+                label={how === 'owned' ? 'Exchange it’s held on' : 'Exchange you bought on'}
+              />
             )}
 
             {kind === 'metal' && (
@@ -675,15 +807,85 @@ export function AddHoldingForm({
                     name="opened_at"
                     required
                     type="date"
-                    max={today}
+                    max={isCash ? today : latest}
                     value={openedAt}
                     onChange={(e) => {
                       setOpenedAt(e.target.value)
-                      lookUpPrice({ ticker, assetClass, openedAt: e.target.value, how }, 350)
+                      lookUpPrice({ openedAt: e.target.value }, 350)
                     }}
                     className={field}
                   />
                 </div>
+
+                {isCash && <PurposeField id={`${uid}-source`} direction="in" value={source} onChange={setSource} />}
+
+                {!isCash && (
+                  <TimeField
+                    id={`${uid}-time`}
+                    value={fillTime}
+                    label={bought ? 'Time it filled' : 'Time you bought it'}
+                    help={
+                      bought
+                        ? undefined
+                        : [
+                            'Kept in its history, and used to find the market price at that moment below.',
+                            'If you know it: it is kept in the history and shows the market price at that moment.',
+                          ]
+                    }
+                    onChange={(next) => {
+                      setFillTime(next)
+                      lookUpPrice({ fillTime: next }, 350)
+                    }}
+                  />
+                )}
+                {timeInFuture && <p className={errorText}>That time hasn’t happened yet. Check the date and time.</p>}
+                {needsTime && !timeInFuture && <p className={errorText}>{aheadOfNewYork(today)}</p>}
+
+                {/* Already owned: the market price then, as a check on the average cost or to fill it in. */}
+                {!isCash && !bought && symbol && quote.status !== 'idle' && (
+                  <div
+                    aria-live="polite"
+                    data-testid="owned-price"
+                    className="rise-in rounded-2xl bg-zinc-100 px-4 py-3 text-sm dark:bg-white/[.05]"
+                  >
+                    {!market && !noMarketPrice ? (
+                      <p className="flex items-center gap-2 text-zinc-500 dark:text-zinc-400">
+                        <CalendarDays className="h-4 w-4 animate-pulse" aria-hidden="true" />
+                        Finding the market price then…
+                      </p>
+                    ) : market ? (
+                      <>
+                        <p key={`${market.date}-${market.price}`} className="text-zinc-700 dark:text-zinc-300">
+                          Market price then:{' '}
+                          <span className="font-semibold tabular-nums text-black dark:text-zinc-50">{shownPrice(market, money)}</span>{' '}
+                          each, {basisWords(market)}, <PriceOrigin market={market} />. <MomentRange market={market} />
+                        </p>
+                        <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-2">
+                          <button
+                            type="button"
+                            onClick={fillCostFromMarket}
+                            disabled={marketCost === null}
+                            aria-pressed={costIsMarket}
+                            className={`rounded-full border px-3.5 py-1.5 text-sm font-medium transition-colors disabled:opacity-40 ${
+                              costIsMarket
+                                ? 'border-mint-600 bg-mint-600/[.08] text-mint-800 dark:border-mint-400 dark:text-mint-200'
+                                : 'border-black/[.12] text-black hover:border-black/40 dark:border-white/[.18] dark:text-zinc-50 dark:hover:border-white/50'
+                            }`}
+                          >
+                            {costIsMarket ? 'Used as your average cost' : 'Use as my average cost'}
+                          </button>
+                          <span className="text-xs leading-5 text-zinc-500 dark:text-zinc-400">
+                            Your broker’s average cost is more exact, if you have it.
+                          </span>
+                        </div>
+                      </>
+                    ) : (
+                      <p className="text-zinc-500 dark:text-zinc-400">
+                        {quote.status === 'done' && !quote.result.ok ? `${quote.result.error} ` : ''}You can still type your average cost.
+                      </p>
+                    )}
+                  </div>
+                )}
 
                 {bought && (
                   <div aria-live="polite" data-testid="add-price" className="flex flex-col gap-3">
@@ -701,8 +903,8 @@ export function AddHoldingForm({
                         className="rise-in text-sm text-zinc-700 dark:text-zinc-300"
                       >
                         <span className="font-semibold tabular-nums text-black dark:text-zinc-50">{shownPrice(market, money)}</span>{' '}
-                        each: {market.basis === 'live' ? 'the live price now' : `the close on ${formatDayDate(market.date)}`},{' '}
-                        <PriceOrigin market={market} />. This becomes its average cost.
+                        each: {basisWords(market)}, <PriceOrigin market={market} />. <MomentRange market={market} /> This becomes its
+                        average cost.
                       </p>
                     ) : (
                       <div className="flex flex-col gap-2">

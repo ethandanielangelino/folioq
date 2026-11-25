@@ -58,7 +58,7 @@ export type ChatAction =
       /** The cash currency the money goes into. */
       into?: string
     }
-  | { id: string; type: 'cash'; direction: 'in' | 'out'; currency?: string; amount?: number; date?: string }
+  | { id: string; type: 'cash'; direction: 'in' | 'out'; currency?: string; amount?: number; date?: string; purpose?: string }
   | { id: string; type: 'remove'; holdingId: string; ticker: string }
 
 export type OutcomeStatus = 'done' | 'cancelled'

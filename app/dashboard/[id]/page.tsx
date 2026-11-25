@@ -108,6 +108,7 @@ export default async function PortfolioPage({ params, searchParams }: Props) {
         quantity: h.quantity,
         costBasis: h.costBasis,
         openedAt: h.openedAt,
+        venue: h.venue,
       }
       return [
         h.id,
@@ -285,7 +286,7 @@ export default async function PortfolioPage({ params, searchParams }: Props) {
                       </>
                     ) : undefined
                   }
-                  holdingHistory={{ ...view.holdingHistory, me: user.id, canEdit }}
+                  holdingHistory={{ ...view.holdingHistory, me: user.id, canEdit, portfolioId: portfolio.id, today }}
                 />
               ),
             },

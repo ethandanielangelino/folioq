@@ -27,6 +27,11 @@ export interface HoldingRow {
    * holding is a US-listed stock.
    */
   asset_class?: string | null
+  /**
+   * The exchange a coin is priced on (an id from lib/venues.ts), or null for
+   * FolioQ's automatic choice. Added by supabase/exchanges.sql.
+   */
+  exchange?: string | null
 }
 
 /** A thesis as stored: assumptions and risks are jsonb, so not trusted to be string arrays. */

@@ -10,6 +10,7 @@ import { currencyName, inOwn, type CashLine } from '@/app/dashboard/[id]/cash-ch
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
 import { CURRENCIES } from '@/lib/currency'
 import { formatDate } from '@/lib/format'
+import { PURPOSE_MAX, cleanPurpose } from '@/lib/history'
 import { cashCovers } from '@/lib/portfolio'
 
 /** The two buttons on the Cash card. */
@@ -21,6 +22,84 @@ export interface CashInitial {
   currency?: string
   amount?: number
   date?: string
+  /** Where money added came from, or what money taken out is for. */
+  purpose?: string
+}
+
+/** Quick picks for the note on cash. Anything else can be typed. */
+const PURPOSE_IDEAS = {
+  in: ['Salary', 'Savings', 'Bonus', 'Dividend', 'Interest', 'Sale proceeds', 'Gift', 'Refund'],
+  out: ['Bills', 'Rent', 'School fees', 'Holiday', 'Emergency', 'Big purchase', 'Gift', 'Moved to another account'],
+}
+
+const PURPOSE_WORDS = {
+  in: {
+    label: 'Where is it from?',
+    placeholder: 'e.g. March salary, or savings from DBS',
+    help: 'Shown in the cash history, so you can see later where this money came from.',
+  },
+  out: {
+    label: 'What is it for?',
+    placeholder: 'e.g. School fees for next term',
+    help: 'Shown in the cash history, so you can see later why it was taken out.',
+  },
+}
+
+/**
+ * The optional note on cash, with quick picks: "Where is it from?" for money
+ * added, "What is it for?" for money taken out. Used in the cash forms and
+ * when editing the note later.
+ */
+export function PurposeField({
+  id,
+  direction,
+  value,
+  onChange,
+}: {
+  id: string
+  direction: 'in' | 'out'
+  value: string
+  onChange: (value: string) => void
+}) {
+  const words = PURPOSE_WORDS[direction]
+  return (
+    <div className="flex flex-col gap-2">
+      <label htmlFor={id} className={fieldLabel}>
+        {words.label} <span className="font-normal text-zinc-500 dark:text-zinc-400">(optional)</span>
+      </label>
+      <input
+        id={id}
+        type="text"
+        maxLength={PURPOSE_MAX}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={words.placeholder}
+        autoComplete="off"
+        className={field}
+      />
+      <div className="flex flex-wrap gap-1.5" aria-label="Quick picks">
+        {PURPOSE_IDEAS[direction].map((idea) => {
+          const chosen = cleanPurpose(value).toLowerCase() === idea.toLowerCase()
+          return (
+            <button
+              key={idea}
+              type="button"
+              aria-pressed={chosen}
+              onClick={() => onChange(chosen ? '' : idea)}
+              className={`rounded-full border px-2.5 py-1 text-xs transition-colors ${
+                chosen
+                  ? 'border-mint-600 bg-mint-600/10 text-mint-700 dark:border-mint-400 dark:bg-mint-400/15 dark:text-mint-300'
+                  : 'border-black/[.12] text-zinc-600 hover:border-black/40 hover:bg-black/[.03] dark:border-white/[.18] dark:text-zinc-300 dark:hover:border-white/50 dark:hover:bg-white/[.05]'
+              }`}
+            >
+              {idea}
+            </button>
+          )
+        })}
+      </div>
+      <p className="text-xs leading-5 text-zinc-500 dark:text-zinc-400">{words.help}</p>
+    </div>
+  )
 }
 
 /**
@@ -44,7 +123,7 @@ export function CashForm({
   cashLines: CashLine[]
   today: string
   initial?: CashInitial
-  onDone: (done: { toast: string; record: string }) => void
+  onDone: (done: { toast: string; record: string; note?: string }) => void
   /** Chat only: the dialog has its own Cancel. */
   onCancel?: () => void
   mode?: 'dialog' | 'chat'
@@ -62,6 +141,7 @@ export function CashForm({
   const [currency, setCurrency] = useState(startCurrency)
   const [amount, setAmount] = useState(initial?.amount ? String(initial.amount) : '')
   const [date, setDate] = useState(initial?.date ?? today)
+  const [purpose, setPurpose] = useState(initial?.purpose ?? '')
   const [error, setError] = useState('')
   const [pending, startTransition] = useTransition()
 
@@ -75,10 +155,12 @@ export function CashForm({
     event.preventDefault()
     setError('')
     startTransition(async () => {
-      const result = await moveMoney(portfolioId, direction, currency, amount, date)
+      const why = cleanPurpose(purpose)
+      const result = await moveMoney(portfolioId, direction, currency, amount, date, why)
       if (!result.ok) return setError(result.error)
       const said = `${inOwn(value, currency)} ${adding ? 'added to' : 'taken out of'} ${currencyName(currency)} cash`
-      startTransition(() => onDone({ toast: said, record: `${said}, on ${formatDate(date)}.` }))
+      const kept = why && !result.note ? ` ${adding ? 'From' : 'For'}: ${why}.` : ''
+      startTransition(() => onDone({ toast: said, record: `${said}, on ${formatDate(date)}.${kept}`, note: result.note }))
     })
   }
 
@@ -151,6 +233,8 @@ export function CashForm({
             />
           </div>
 
+          <PurposeField id={`${uid}-purpose`} direction={direction} value={purpose} onChange={setPurpose} />
+
           {valid && (
             <div aria-live="polite" className="rise-in rounded-2xl bg-zinc-100 px-4 py-3 text-sm dark:bg-white/[.05]">
               {tooMuch ? (
@@ -170,6 +254,7 @@ export function CashForm({
             <p data-testid="action-summary" className="rise-in rounded-2xl border border-mint-600/30 bg-mint-600/[.06] px-4 py-3 text-sm leading-6 text-black dark:border-mint-400/30 dark:bg-mint-400/[.08] dark:text-zinc-50">
               {adding ? 'Add' : 'Take'} {inOwn(value, currency)} {adding ? 'to' : 'out of'} {currencyName(currency)} cash
               {date === today ? ', today' : `, on ${formatDate(date)}`}.
+              {cleanPurpose(purpose) ? ` ${adding ? 'From' : 'For'}: ${cleanPurpose(purpose)}.` : ''}
             </p>
           )}
 
@@ -232,7 +317,7 @@ export default function CashDialog({
           today={today}
           onDone={(done) => {
             setOpen(false)
-            toast(done.toast)
+            toast(done.note ?? done.toast)
           }}
         />
       </DialogContent>

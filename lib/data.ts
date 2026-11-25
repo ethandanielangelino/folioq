@@ -4,6 +4,9 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { getAssetQuotes, cryptoName, lastClosesBefore } from '@/lib/asset-prices'
 import { withDirectQuotes } from '@/lib/direct-prices'
+import { withVenueQuotes } from '@/lib/venue-prices'
+import { isForeignListing, toVenueId } from '@/lib/venues'
+import { yahooListing } from '@/lib/yahoo'
 import { CURRENCIES } from '@/lib/currency'
 import {
   METALS,
@@ -43,7 +46,12 @@ export function isUuid(value: string): boolean {
   return UUID_PATTERN.test(value)
 }
 
-type AssetInput = HoldingInput & { assetClass: AssetClass; key: string }
+type AssetInput = HoldingInput & {
+  assetClass: AssetClass
+  key: string
+  /** The exchange a coin is priced on, or null for the automatic choice. */
+  venue: string | null
+}
 
 function toHoldingInput(row: HoldingRow): AssetInput {
   const assetClass = toAssetClass(row.asset_class)
@@ -56,6 +64,7 @@ function toHoldingInput(row: HoldingRow): AssetInput {
     quantity: Number(row.quantity),
     costBasis: row.cost_basis === null ? null : Number(row.cost_basis),
     openedAt: String(row.opened_at).slice(0, 10),
+    venue: assetClass === 'crypto' ? toVenueId(row.exchange) : null,
   }
 }
 
@@ -91,6 +100,8 @@ export interface Holding extends ValuedHolding {
   thesis: Thesis | null
   /** Earlier versions, newest first. */
   thesisHistory: Thesis[]
+  /** The exchange a coin is priced on (lib/venues.ts), or null for the automatic choice. */
+  venue: string | null
   /**
    * Where its price came from: the exchange and pair when it is quoted directly
    * in the display currency, otherwise a US-dollar source. Null when unpriced,
@@ -148,12 +159,30 @@ export interface PortfolioCard {
 const UNCLASSIFIED = 'Funds and other'
 const SPARKLINE_DAYS = 90
 
+/** A share listed outside the US: its name and industry from Yahoo Finance, as Finnhub's free plan has none. */
+async function foreignProfile(ticker: string): Promise<CompanyProfile | null> {
+  const match = await yahooListing(ticker)
+  if (!match) return null
+  return {
+    name: match.name,
+    ticker,
+    exchange: null,
+    // Funds have no industry, which is how the page tells them from companies.
+    industry: match.type === 'EQUITY' ? (match.industry ?? 'Other') : null,
+    country: null,
+    currency: null,
+    ipo: null,
+    marketCap: null,
+    website: null,
+  }
+}
+
 async function getProfiles(tickers: string[]): Promise<Record<string, CompanyProfile | null>> {
   const profiles: Record<string, CompanyProfile | null> = {}
   const concurrency = 6
   for (let i = 0; i < tickers.length; i += concurrency) {
     const batch = tickers.slice(i, i + concurrency)
-    const results = await Promise.all(batch.map((t) => getProfile(t)))
+    const results = await Promise.all(batch.map((t) => (isForeignListing(t) ? foreignProfile(t) : getProfile(t))))
     batch.forEach((ticker, index) => {
       profiles[ticker] = results[index]
     })
@@ -234,9 +263,18 @@ export async function buildPortfolioView(
     getMoney(),
   ])
   const coinName = new Map(coinNames)
-  // Coins quoted directly in the display currency use that price; the rest stay
-  // US-dollar prices, converted when shown. `quotes` stays in US dollars for saving.
-  const shown = await withDirectQuotes(inputs, quotes, money)
+  // A coin on a chosen exchange takes that exchange's price. Other coins quoted
+  // directly in the display currency use that price; the rest stay US-dollar
+  // prices, converted when shown. `quotes` stays in US dollars for saving, and
+  // is the automatic price, so the saved history is the same for everyone.
+  const shown = await withVenueQuotes(
+    inputs,
+    await withDirectQuotes(
+      inputs.filter((h) => !h.venue),
+      quotes,
+      money
+    )
+  )
 
   const thesesByHolding = new Map<string, Thesis[]>()
   for (const row of thesisRows) {
@@ -257,6 +295,7 @@ export async function buildPortfolioView(
       industry: kindOf(h.assetClass) === 'listed' ? (profiles[h.ticker]?.industry ?? null) : null,
       thesis: versions[0] ?? null,
       thesisHistory: versions.slice(1),
+      venue: h.venue,
       priceSource: shown[h.key]?.source ?? null,
     }
   })
@@ -589,7 +628,13 @@ export async function getPortfolioCards(
     getAssetQuotes(allInputs, lastClosesBefore(priceRows, today)),
     getMoney(),
   ])
-  const quotes = await withDirectQuotes(allInputs, usdQuotes, money)
+  // A coin on a chosen exchange is valued there; two portfolios can choose
+  // different exchanges for the same coin, so that is done per portfolio below.
+  const quotes = await withDirectQuotes(
+    allInputs.filter((h) => !h.venue),
+    usdQuotes,
+    money
+  )
   const closes = priceRows
     .map((p) => ({
       ticker: p.ticker,
@@ -598,9 +643,18 @@ export async function getPortfolioCards(
     }))
     .filter((p) => p.date < today)
 
+  const venueQuotes = new Map(
+    await Promise.all(
+      rows.map(async (portfolio) => {
+        const inputs = (byPortfolio.get(portfolio.id) ?? []).map(toHoldingInput)
+        return [portfolio.id, await withVenueQuotes(inputs, quotes)] as const
+      })
+    )
+  )
+
   return rows.map((portfolio) => {
     const inputs = (byPortfolio.get(portfolio.id) ?? []).map(toHoldingInput)
-    const valued = valueHoldings(inputs, quotes)
+    const valued = valueHoldings(inputs, venueQuotes.get(portfolio.id) ?? quotes)
     const totals = withoutCash(computeTotals(valued), valued)
 
     const history = buildHistory(inputs, closes)

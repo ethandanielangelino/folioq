@@ -377,9 +377,11 @@ function PriceCredit({
       ? [`Rate from ${source.name}`, null]
       : source.pair
         ? [source.name, source.pair]
-        : converted
-          ? [source.name, 'in US$']
-          : [source.name, null]
+        : source.currency
+          ? [source.name, `in ${source.currency}`]
+          : converted
+            ? [source.name, 'in US$']
+            : [source.name, null]
   const label = stacked ? (
     <>
       <span className="block whitespace-nowrap">{first}</span>
@@ -394,9 +396,15 @@ function PriceCredit({
     ? 'No source answered just now, so this is the last price FolioQ saved.'
     : cash
       ? `Valued at the exchange rate from ${source.name}.`
-      : source.pair
-        ? `Quoted directly in ${money.code} on ${source.name}'s ${source.pair} market.`
-        : converted
+      : source.venue
+        ? `Priced on ${source.name}'s ${source.pair} market, the exchange chosen for this holding${
+            source.pair?.endsWith(`/${money.code}`) ? '' : `, converted to ${money.code}`
+          }.`
+        : source.pair
+          ? `Quoted directly in ${money.code} on ${source.name}'s ${source.pair} market.`
+          : source.currency
+            ? `${source.name}'s price in ${source.currency}, as the market quotes it${source.currency === money.code ? '' : `, converted to ${money.code}`}.`
+            : converted
           ? `${source.name}'s US-dollar price, converted to ${money.code}.`
           : `Price from ${source.name}.`
   const style = `text-zinc-500 dark:text-zinc-400 ${className}`

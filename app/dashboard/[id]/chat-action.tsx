@@ -119,7 +119,7 @@ export default function ChatActionCard({ action }: { action: ChatAction }) {
       <CashForm
         {...common}
         direction={action.direction}
-        initial={{ currency: action.currency, amount: action.amount, date: action.date }}
+        initial={{ currency: action.currency, amount: action.amount, date: action.date, purpose: action.purpose }}
       />
     )
   } else {

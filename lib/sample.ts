@@ -107,6 +107,7 @@ export const sampleHoldings: Holding[] = valued.map((h) => {
     ...h,
     assetClass: 'stock' as const,
     key: h.ticker,
+    venue: null,
     name: profiles[h.ticker].name,
     industry: profiles[h.ticker].industry,
     thesis: versions[0] ?? null,

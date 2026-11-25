@@ -1,6 +1,8 @@
 // Server-only: live prices for every kind of holding, in US dollars.
 //
-//   listed  Finnhub (lib/finnhub.ts), as before
+//   listed  Finnhub (lib/finnhub.ts) for US tickers; Yahoo Finance
+//           (lib/yahoo.ts) for shares listed elsewhere (D05.SI), in their
+//           own currency, converted to US dollars at the live rate
 //   crypto  Coinbase Exchange's 24-hour stats, Kraken if Coinbase has no
 //           answer. "Change" is over the last 24 hours: crypto trades all
 //           day, every day, so it has no closing bell to measure from.
@@ -17,6 +19,8 @@ import { getQuotes, type Quote } from '@/lib/finnhub'
 import { fresh } from '@/lib/fresh'
 import { COINBASE, GOLD_API, KRAKEN, SAVED, type PriceSource } from '@/lib/price-sources'
 import { getRate } from '@/lib/fx'
+import { isForeignListing } from '@/lib/venues'
+import { yahooLive } from '@/lib/yahoo'
 
 export interface PricedItem {
   ticker: string
@@ -120,6 +124,44 @@ export async function cryptoName(symbol: string): Promise<string | null> {
   return typeof body?.name === 'string' && body.name.trim() ? body.name.trim() : null
 }
 
+// ---------------------------------------------------------------- shares listed outside the US
+
+export type ForeignLookup = { status: 'ok'; quote: Quote } | { status: 'unknown' } | { status: 'unavailable' }
+
+/**
+ * A share listed outside the US, from Yahoo Finance in its own currency,
+ * converted to US dollars at the live rate. The day's change is the share's
+ * own move: both prices are converted at the same rate.
+ */
+export async function lookupForeign(ticker: string): Promise<ForeignLookup> {
+  const found = await yahooLive(ticker)
+  if (found.status !== 'ok') return found
+  const { live } = found
+  const rate = await getRate(live.currency)
+  if (!rate) return { status: 'unavailable' }
+  const usd = (v: number) => v / rate.rate
+  const price = usd(live.price)
+  const previous = live.previousClose !== null ? usd(live.previousClose) : null
+  return {
+    status: 'ok',
+    quote: {
+      price,
+      change: previous === null ? null : price - previous,
+      changePercent: previous ? (price - previous) / previous : 0,
+      high: live.high !== null ? usd(live.high) : Math.max(price, previous ?? price),
+      low: live.low !== null ? usd(live.low) : Math.min(price, previous ?? price),
+      open: previous ?? price,
+      previousClose: previous ?? price,
+      timestamp: live.time,
+      source: {
+        name: 'Yahoo Finance',
+        url: `https://finance.yahoo.com/quote/${encodeURIComponent(ticker)}`,
+        currency: live.currency,
+      },
+    },
+  }
+}
+
 // ---------------------------------------------------------------- metals and cash
 
 async function metalPrice(symbol: string): Promise<number | null> {
@@ -150,8 +192,13 @@ export async function getAssetQuotes(
   const unique = new Map<string, PricedItem>()
   for (const item of items) unique.set(priceKey(item.ticker, item.assetClass), item)
 
-  const listed = [...unique.entries()].filter(([, item]) => kindOf(item.assetClass) === 'listed')
-  const others = [...unique.entries()].filter(([, item]) => kindOf(item.assetClass) !== 'listed')
+  // US tickers go to Finnhub together; shares listed elsewhere to Yahoo, one by one.
+  const listed = [...unique.entries()].filter(
+    ([, item]) => kindOf(item.assetClass) === 'listed' && !isForeignListing(item.ticker)
+  )
+  const others = [...unique.entries()].filter(
+    ([, item]) => kindOf(item.assetClass) !== 'listed' || isForeignListing(item.ticker)
+  )
 
   const [listedQuotes, otherQuotes] = await Promise.all([
     getQuotes(listed.map(([, item]) => item.ticker)),
@@ -159,6 +206,11 @@ export async function getAssetQuotes(
       others.map(async ([key, item]): Promise<[string, Result]> => {
         const kind = kindOf(item.assetClass)
         const saved = previousCloses[key] ?? null
+        if (kind === 'listed') {
+          const found = await lookupForeign(item.ticker)
+          if (found.status === 'ok') return [key, found.quote]
+          return [key, saved !== null ? quote(saved, saved, SAVED) : null]
+        }
         if (kind === 'crypto') {
           const found = await lookupCrypto(item.ticker)
           if (found.status === 'ok') return [key, found.quote]

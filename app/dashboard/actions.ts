@@ -12,7 +12,10 @@ import {
   searchSymbols,
   type SymbolMatch,
 } from '@/lib/finnhub'
-import { lookupCrypto } from '@/lib/asset-prices'
+import { lookupCrypto, lookupForeign } from '@/lib/asset-prices'
+import { venueQuote, venuesFor, type VenueOption } from '@/lib/venue-prices'
+import { cryptoVenue, isForeignListing, localTicker, stockMarket, tickerOn, toVenueId, US_MARKET } from '@/lib/venues'
+import { securityType, yahooListing, yahooSearch } from '@/lib/yahoo'
 import {
   METALS,
   allowedGroups,
@@ -28,10 +31,21 @@ import {
 } from '@/lib/assets'
 import { CURRENCIES, isCurrency, money as inCurrency } from '@/lib/currency'
 import { getRateOn } from '@/lib/fx'
-import { formatShares, marketDate } from '@/lib/format'
-import { ENTERED, historyNotSetUp, type HistoryKind } from '@/lib/history'
+import { formatDate, formatShares, marketDate } from '@/lib/format'
+import {
+  ENTERED,
+  historyNotSetUp,
+  holdingAfterEdit,
+  cleanPurpose,
+  isEditable,
+  takesPurpose,
+  replayAsset,
+  toHistoryEntry,
+  type HistoryEntry,
+  type HistoryKind,
+} from '@/lib/history'
 import { cashCovers, planBuy, planSale, unitsForMoney } from '@/lib/portfolio'
-import { isIsoDate, saleDateProblem } from '@/lib/sale-date'
+import { isIsoDate, saleDateProblem, shiftDate } from '@/lib/sale-date'
 import { datedPrice, type DatedPrice } from '@/lib/dated-price'
 import { outcomeMessage, type OutcomeStatus } from '@/lib/chat-actions'
 import { getMoney } from '@/lib/money'
@@ -77,9 +91,13 @@ interface HistoryRecord {
   costBasis?: number | null
   quantityBefore?: number | null
   tradeDate: string
+  /** The moment it happened, when a time was given (ISO). */
+  tradedAt?: string | null
   cashChange?: number
   /** The cash line the money moved through, when it isn't US dollars. */
   cashCurrency?: string
+  /** Cash moved: where money added came from, or what money taken out was for. */
+  purpose?: string | null
 }
 
 /** The name shown beside a history entry: the profile's, else the account's. */
@@ -104,7 +122,7 @@ async function logHistory(
   portfolioId: string,
   asset: { ticker: string; assetClass: AssetClass },
   record: HistoryRecord
-): Promise<void> {
+): Promise<{ saved: boolean; purposeKept: boolean }> {
   const row = {
     portfolio_id: portfolioId,
     asset_key: priceKey(asset.ticker, asset.assetClass),
@@ -122,15 +140,26 @@ async function logHistory(
     created_by: user.id,
     actor_name: await displayName(supabase, user),
     cash_currency: record.cashCurrency ?? 'USD',
+    ...(record.tradedAt ? { traded_at: record.tradedAt } : {}),
+    ...(record.purpose ? { purpose: record.purpose } : {}),
   }
   let { error } = await supabase.from('holding_history').insert(row)
-  // A table from before cash_currency existed (history.sql not re-run yet): keep the entry, minus that column.
-  if (error && missingColumn(error)) {
-    const { cash_currency: _currency, ...older } = row
-    void _currency
-    ;({ error } = await supabase.from('holding_history').insert(older))
+  // A table from before purpose (supabase/edits.sql), traded_at (exchanges.sql)
+  // or cash_currency (history.sql re-run): keep the entry, minus those columns,
+  // newest first.
+  let kept: Record<string, unknown> = row
+  const dropped: string[] = []
+  for (const column of ['purpose', 'traded_at', 'cash_currency']) {
+    if (!error || !missingColumn(error)) break
+    if (!(column in kept)) continue
+    const { [column]: _gone, ...rest } = kept
+    void _gone
+    kept = rest
+    dropped.push(column)
+    ;({ error } = await supabase.from('holding_history').insert(kept))
   }
   if (error && !historyNotSetUp(error)) console.error('Could not add to the holding history:', error.message)
+  return { saved: !error, purposeKept: !error && !dropped.includes('purpose') }
 }
 
 /**
@@ -291,6 +320,9 @@ export async function deletePortfolio(portfolioId: string): Promise<ActionResult
 const ASSETS_NOT_SET_UP =
   'Crypto, gold and silver, and cash need one more database script. Run supabase/assets.sql in the Supabase SQL editor.'
 
+const EXCHANGES_NOT_SET_UP =
+  'Choosing an exchange needs one more database script. Run supabase/exchanges.sql in the Supabase SQL editor, or leave the exchange on Automatic.'
+
 /** The asset_class column is missing until supabase/assets.sql has been run. */
 const missingColumn = (error: { code?: string } | null) =>
   error?.code === 'PGRST204' || error?.code === '42703'
@@ -299,9 +331,25 @@ const missingColumn = (error: { code?: string } | null) =>
 const inOwnCurrency = (amount: number, code: string) => inCurrency(amount, { code, rate: 1 })
 const currencyName = (code: string) => CURRENCIES.find((c) => c.code === code)?.name ?? code
 
-function dateProblem(value: string, label: string): string | null {
+/**
+ * The latest date a trade can be on. Dates follow New York, where US markets
+ * trade, but east of it the day has already turned (a Singapore morning is
+ * still yesterday evening there). With a time given, the moment itself is
+ * checked against now, so the person's own date, up to a day ahead, is fine.
+ */
+function latestDate(at: number | null): string {
+  return at !== null ? shiftDate(marketDate(), 1) : marketDate()
+}
+
+/** Said when a date is New York's tomorrow and no time was given. */
+const AHEAD_OF_NEW_YORK = (label: string) =>
+  `In New York, where FolioQ counts dates, it is still ${formatDate(marketDate())}. Add the time it filled, or pick that as the ${label}.`
+
+function dateProblem(value: string, label: string, at: number | null = null): string | null {
   if (!isIsoDate(value)) return `Pick the ${label}.`
-  if (value > marketDate()) return `The ${label} can’t be in the future.`
+  if (value > latestDate(at)) {
+    return value === shiftDate(marketDate(), 1) ? AHEAD_OF_NEW_YORK(label) : `The ${label} can’t be in the future.`
+  }
   if (value < '1970-01-01') return 'That date is too far back.'
   return null
 }
@@ -387,11 +435,34 @@ function savedCloses(supabase: Supabase) {
 
 interface TradePrice {
   price: number
-  /** The close's trading day; null for a live or typed-in price. */
+  /** The close's trading day; null for a live, timed, or typed-in price. */
   priceDate: string | null
   /** Where it came from; null when typed in. */
   source: string | null
 }
+
+/**
+ * The moment a trade happened, from the form: an ISO timestamp the browser
+ * worked out from the date and time typed, in the person's own time zone.
+ * Null when no time was given; an error when it can't be right. It must fall
+ * on or within a day of the date given (time zones differ by up to 14
+ * hours), and not in the future.
+ */
+function readMoment(input: unknown, date: string): { ok: true; at: number | null } | { ok: false; error: string } {
+  if (input === undefined || input === null || input === '') return { ok: true, at: null }
+  const ms = typeof input === 'string' ? Date.parse(input) : NaN
+  if (!Number.isFinite(ms)) return { ok: false, error: 'That time isn’t one FolioQ can read. Pick it again, or leave it blank.' }
+  const at = Math.floor(ms / 1000)
+  if (at > Date.now() / 1000 + 120) return { ok: false, error: 'The time can’t be in the future.' }
+  const day = Date.parse(`${date}T12:00:00Z`) / 1000
+  if (!Number.isFinite(day) || Math.abs(at - day) > 26 * 3600) {
+    return { ok: false, error: 'The time doesn’t match the date. Pick them again.' }
+  }
+  return { ok: true, at }
+}
+
+/** A holding's chosen exchange, read from its row (null: automatic, or before supabase/exchanges.sql). */
+const venueOf = (row: HoldingRow) => toVenueId(row.exchange)
 
 /**
  * The market price on a date. A price typed in by hand is only used when no
@@ -399,16 +470,18 @@ interface TradePrice {
  */
 async function resolvePrice(
   supabase: Supabase,
-  item: { ticker: string; assetClass: AssetClass },
+  item: { ticker: string; assetClass: AssetClass; venue?: string | null },
   date: string,
-  manualInput: string | undefined
+  manualInput: string | undefined,
+  at: number | null = null
 ): Promise<{ ok: true; value: TradePrice } | { ok: false; error: string }> {
-  const found = await datedPrice(item, date, marketDate(), savedCloses(supabase), await getMoney())
+  const found = await datedPrice(item, date, marketDate(), savedCloses(supabase), await getMoney(), at)
   if (found.ok) {
+    // The source is kept with its pair: "Binance (BTC/USDT)", "Independent Reserve (BTC/SGD)".
+    const shut = found.moment && !found.moment.inside ? ', the last trade before that time' : ''
     return {
       ok: true,
-      // The source is kept with its pair when it was quoted directly: "Independent Reserve (BTC/SGD)".
-      value: { price: found.price, priceDate: found.basis === 'close' ? found.date : null, source: sourceLabel(found.source) },
+      value: { price: found.price, priceDate: found.basis === 'close' ? found.date : null, source: `${sourceLabel(found.source)}${shut}` },
     }
   }
   const manual = Number(manualInput)
@@ -430,12 +503,25 @@ export interface Classification {
   name: string | null
 }
 
+/** What a listed ticker is: from Finnhub for US tickers, Yahoo Finance for the rest. */
+async function listingOf(ticker: string): Promise<{ type: string; description: string } | null> {
+  if (!isForeignListing(ticker)) return getListing(ticker)
+  const match = await yahooListing(ticker)
+  return match ? { type: securityType(match), description: match.name } : null
+}
+
+/** A typed ticker on a market as it is stored: "d05" on SGX is D05.SI. Null if it can't be a ticker. */
+function listedTicker(typed: string, marketInput: unknown): string | null {
+  const market = stockMarket(marketInput) ?? US_MARKET
+  return normalizeAssetSymbol(tickerOn(typed, market), 'stock')
+}
+
 /** For Add a holding: whether a ticker is a company, a REIT, or a fund, and the group it fits. */
-export async function classifyTicker(symbolInput: string): Promise<Classification> {
+export async function classifyTicker(symbolInput: string, marketInput?: string): Promise<Classification> {
   const { user } = await requireUser()
-  const ticker = user && typeof symbolInput === 'string' ? normalizeAssetSymbol(symbolInput, 'stock') : null
+  const ticker = user && typeof symbolInput === 'string' ? listedTicker(symbolInput, marketInput) : null
   if (!ticker) return { type: 'unknown', suggested: 'stock', name: null }
-  const listing = await getListing(ticker)
+  const listing = await listingOf(ticker)
   const type = listingTypeOf(listing?.type)
   const suggested = type === 'company' ? 'stock' : type === 'reit' ? 'property' : guessFundGroup(listing?.description)
   return { type, suggested, name: listing?.description ?? null }
@@ -447,7 +533,7 @@ export async function classifyTicker(symbolInput: string): Promise<Classificatio
  * label can't be wrong whatever the form sends.
  */
 async function fittingGroup(ticker: string, wanted: AssetClass): Promise<AssetClass> {
-  const allowed = allowedGroups(listingTypeOf((await getListing(ticker))?.type))
+  const allowed = allowedGroups(listingTypeOf((await listingOf(ticker))?.type))
   return allowed.includes(wanted) ? wanted : allowed[0]
 }
 
@@ -509,17 +595,23 @@ async function moveCash(
 const SHORT_TO_PAY = (code: string) => (have: string, need: string) =>
   `That costs ${need}, but this portfolio has ${have} in ${currencyName(code)} cash. Buy less, or pay another way.`
 
+const PURPOSE_NOT_SET_UP =
+  'Saving notes on cash needs one more database script. Run supabase/edits.sql in the Supabase SQL editor.'
+
 /**
  * Puts money into, or takes it out of, the portfolio's cash in any currency,
- * on a date. Recorded in the history as a deposit or a withdrawal.
+ * on a date. Recorded in the history as a deposit or a withdrawal, with an
+ * optional note: where money added came from, or what money taken out was
+ * for. `note` is set when the money moved but that couldn't be kept.
  */
 export async function moveMoney(
   portfolioId: string,
   direction: 'in' | 'out',
   currencyInput: string,
   amountInput: string,
-  dateInput: string
-): Promise<ActionResult> {
+  dateInput: string,
+  purposeInput = ''
+): Promise<{ ok: true; note?: string } | { ok: false; error: string }> {
   const { supabase, user } = await requireUser()
   if (!user) return { ok: false, error: SIGNED_OUT }
   if (!(await canEdit(supabase, user.id, portfolioId))) return { ok: false, error: VIEW_ONLY }
@@ -537,11 +629,56 @@ export async function moveMoney(
   })
   if (!cash.ok) return cash
 
-  await logHistory(supabase, user, portfolioId, { ticker: currencyInput, assetClass: 'cash' }, {
+  const purpose = cleanPurpose(purposeInput)
+  const logged = await logHistory(supabase, user, portfolioId, { ticker: currencyInput, assetClass: 'cash' }, {
     kind: direction === 'in' ? 'deposited' : 'withdrawn',
     quantity: amount,
     tradeDate: dateInput,
+    purpose: purpose || null,
   })
+  refresh(portfolioId)
+  if (purpose && !logged.purposeKept) {
+    const moved = direction === 'in' ? 'added, but not where it came from' : 'taken out, but not what it was for'
+    return { ok: true, note: logged.saved ? `The money was ${moved}. ${PURPOSE_NOT_SET_UP}` : undefined }
+  }
+  return { ok: true }
+}
+
+/**
+ * Adds, changes or clears the note on cash moved in or out: where it came
+ * from, or what it was for. The database keeps the earlier wording
+ * (supabase/edits.sql).
+ */
+export async function setEntryPurpose(portfolioId: string, entryId: string, purposeInput: string): Promise<ActionResult> {
+  const { supabase, user } = await requireUser()
+  if (!user) return { ok: false, error: SIGNED_OUT }
+  if (!isUuid(portfolioId) || !isUuid(entryId)) return { ok: false, error: 'Entry not found.' }
+  if (!(await canEdit(supabase, user.id, portfolioId))) return { ok: false, error: VIEW_ONLY }
+  const purpose = cleanPurpose(purposeInput)
+
+  const { data: row, error: readError } = await supabase
+    .from('holding_history')
+    .select('*')
+    .eq('id', entryId)
+    .eq('portfolio_id', portfolioId)
+    .maybeSingle()
+  if (readError || !row) return { ok: false, error: 'Entry not found.' }
+  const entry = toHistoryEntry(row)
+  if (!entry || !takesPurpose(entry)) return { ok: false, error: 'Only money added or taken out can have a note.' }
+  if (!('purpose' in row)) return { ok: false, error: PURPOSE_NOT_SET_UP }
+  if ((entry.purpose ?? '') === purpose) return { ok: true }
+
+  const { data, error } = await supabase
+    .from('holding_history')
+    .update({ purpose: purpose || null, edited_name: await displayName(supabase, user), edit_note: 'purpose' })
+    .eq('id', entryId)
+    .eq('portfolio_id', portfolioId)
+    .select('id')
+  // An update the access rules don't allow changes no row and says nothing, so the row count is checked too.
+  if (error || !data || data.length !== 1) {
+    const notSetUp = !error || missingColumn(error) || error.code === '42501' || /permission|policy/i.test(error.message ?? '')
+    return { ok: false, error: notSetUp ? PURPOSE_NOT_SET_UP : 'Could not save it. Try again.' }
+  }
   refresh(portfolioId)
   return { ok: true }
 }
@@ -568,7 +705,8 @@ export async function addHolding(portfolioId: string, formData: FormData): Promi
   let assetClass: AssetClass = classInput
   const kind = kindOf(assetClass)
 
-  const ticker = normalizeAssetSymbol(text(formData, 'ticker'), assetClass)
+  const ticker =
+    kind === 'listed' ? listedTicker(text(formData, 'ticker'), text(formData, 'market')) : normalizeAssetSymbol(text(formData, 'ticker'), assetClass)
   if (!ticker || (kind === 'cash' && !isCurrency(ticker))) {
     const ask = {
       listed: 'Enter a ticker symbol, like AAPL.',
@@ -585,8 +723,15 @@ export async function addHolding(portfolioId: string, formData: FormData): Promi
   if (!amounts.ok) return amounts
   let quantity = amounts.quantity
   const openedAt = text(formData, 'opened_at')
-  const badDate = dateProblem(openedAt, kind === 'cash' ? 'date' : 'date bought')
+  // The moment it was bought, if given, and the exchange a coin is priced on ('' is automatic).
+  // Kept for something already owned too: it dates the start of its history to the moment.
+  const moment = readMoment(kind !== 'cash' ? text(formData, 'traded_at') : '', openedAt)
+  if (!moment.ok) return moment
+  const badDate = dateProblem(openedAt, kind === 'cash' ? 'date' : 'date bought', moment.at)
   if (badDate) return { ok: false, error: badDate }
+  const venueInput = text(formData, 'exchange')
+  const venue = kind === 'crypto' ? toVenueId(venueInput) : null
+  if (kind === 'crypto' && venueInput && !venue) return { ok: false, error: 'Choose an exchange from the list, or Automatic.' }
 
   // One holding per thing per portfolio: the same coin twice, or the same
   // ticker under two groupings, would double-count it.
@@ -611,15 +756,27 @@ export async function addHolding(portfolioId: string, formData: FormData): Promi
   // Reject things the price sources have never heard of. If a source is
   // unreachable we let it through rather than block bookkeeping.
   if (kind === 'listed') {
-    const lookup = await lookupQuote(ticker)
+    const foreign = isForeignListing(ticker)
+    const lookup = foreign ? await lookupForeign(ticker) : await lookupQuote(ticker)
     if (lookup.status === 'unknown') {
-      return { ok: false, error: `No market data for “${ticker}”. Check the ticker symbol.` }
+      return {
+        ok: false,
+        error: foreign
+          ? `Yahoo Finance has no prices for “${localTicker(ticker)}” on that market. Check the ticker and the market.`
+          : `No market data for “${ticker}”. Check the ticker symbol, or choose the market it trades on.`,
+      }
     }
     assetClass = await fittingGroup(ticker, assetClass)
+  } else if (kind === 'crypto' && venue) {
+    const lookup = await venueQuote(venue, ticker)
+    if (lookup.status === 'unlisted') {
+      const v = cryptoVenue(venue)!
+      return { ok: false, error: `${v.name} doesn’t list ${ticker}/${v.quote}. Check the symbol, or choose another exchange.` }
+    }
   } else if (kind === 'crypto') {
     const lookup = await lookupCrypto(ticker)
     if (lookup.status === 'unknown') {
-      return { ok: false, error: `Neither Coinbase nor Kraken lists a coin called “${ticker}”. Check the symbol.` }
+      return { ok: false, error: `Neither Coinbase nor Kraken lists a coin called “${ticker}”. Check the symbol, or choose the exchange you use.` }
     }
   }
 
@@ -631,7 +788,7 @@ export async function addHolding(portfolioId: string, formData: FormData): Promi
 
   if (kind !== 'cash' && text(formData, 'how') === 'bought') {
     // Bought just now: the market sets the price, not the form.
-    const found = await resolvePrice(supabase, { ticker, assetClass }, openedAt, text(formData, 'manual_price'))
+    const found = await resolvePrice(supabase, { ticker, assetClass, venue }, openedAt, text(formData, 'manual_price'), moment.at)
     if (!found.ok) return found
     priced = found.value
     costBasis = priced.price
@@ -674,10 +831,15 @@ export async function addHolding(portfolioId: string, formData: FormData): Promi
     // Only sent when it isn't a plain stock, so stocks can still be added
     // before supabase/assets.sql has been run.
     ...(assetClass === 'stock' ? {} : { asset_class: assetClass }),
+    // Likewise only sent when one was chosen (supabase/exchanges.sql adds the column).
+    ...(venue ? { exchange: venue } : {}),
   })
   if (error) {
     await undoCash()
-    return { ok: false, error: missingColumn(error) ? ASSETS_NOT_SET_UP : 'Could not save the holding. Try again.' }
+    return {
+      ok: false,
+      error: missingColumn(error) ? (venue ? EXCHANGES_NOT_SET_UP : ASSETS_NOT_SET_UP) : 'Could not save the holding. Try again.',
+    }
   }
 
   await logHistory(supabase, user, portfolioId, { ticker, assetClass }, {
@@ -688,8 +850,11 @@ export async function addHolding(portfolioId: string, formData: FormData): Promi
     // A purchase priced by the market names its source; typed-in prices and costs don't.
     priceSource: priced ? (priced.source ?? ENTERED) : null,
     tradeDate: openedAt,
+    tradedAt: moment.at !== null ? new Date(moment.at * 1000).toISOString() : null,
     cashChange,
     cashCurrency,
+    // Cash: where it came from.
+    purpose: kind === 'cash' ? cleanPurpose(text(formData, 'purpose')) || null : null,
   })
 
   refresh(portfolioId)
@@ -727,6 +892,17 @@ export async function updateHolding(
       ? await fittingGroup(current.ticker, regroup)
       : currentClass
 
+  // A coin's exchange can be changed (or set back to Automatic, sent as '').
+  const venueChange = kind === 'crypto' && formData.has('exchange') ? { wanted: toVenueId(text(formData, 'exchange')) } : null
+  if (venueChange && text(formData, 'exchange') && !venueChange.wanted) {
+    return { ok: false, error: 'Choose an exchange from the list, or Automatic.' }
+  }
+  if (venueChange?.wanted && (await venueQuote(venueChange.wanted, current.ticker)).status === 'unlisted') {
+    const v = cryptoVenue(venueChange.wanted)!
+    return { ok: false, error: `${v.name} doesn’t list ${current.ticker}/${v.quote}. Choose another exchange.` }
+  }
+  const venueChanged = venueChange !== null && venueChange.wanted !== venueOf(current)
+
   const oldQuantity = Number(current.quantity)
   const oldCost = current.cost_basis === null ? null : Number(current.cost_basis)
   let quantity = oldQuantity
@@ -755,11 +931,15 @@ export async function updateHolding(
       cost_basis: costBasis,
       opened_at: openedAt,
       ...(newClass !== currentClass ? { asset_class: newClass } : {}),
+      ...(venueChanged ? { exchange: venueChange.wanted } : {}),
     })
     .eq('id', holdingId)
     .eq('portfolio_id', portfolioId)
   if (error) {
-    return { ok: false, error: missingColumn(error) ? ASSETS_NOT_SET_UP : 'Could not save the holding. Try again.' }
+    return {
+      ok: false,
+      error: missingColumn(error) ? (venueChanged ? EXCHANGES_NOT_SET_UP : ASSETS_NOT_SET_UP) : 'Could not save the holding. Try again.',
+    }
   }
 
   // A correction to the amount or the cost goes in the history, with what it was before.
@@ -842,9 +1022,14 @@ export type BuyResult =
     }
   | { ok: false; error: string }
 
-/** A buy can be on any past date; a sale can't be before the holding was bought. */
-function tradeDateProblem(side: Side, date: unknown, openedAt: string, today: string): string | null {
-  return saleDateProblem(date, { openedAt: side === 'sell' ? openedAt : '1970-01-01', today })
+/**
+ * A buy can be on any past date; a sale can't be before the holding was
+ * bought. With a time, the date may be the person's own, a day ahead of New York.
+ */
+function tradeDateProblem(side: Side, date: unknown, openedAt: string, at: number | null): string | null {
+  const latest = latestDate(at)
+  if (at === null && date === shiftDate(marketDate(), 1)) return AHEAD_OF_NEW_YORK(side === 'sell' ? 'sale date' : 'date bought')
+  return saleDateProblem(date, { openedAt: side === 'sell' ? openedAt : '1970-01-01', today: latest })
 }
 
 /** The holding, checked for a trade on that date by this user. */
@@ -854,16 +1039,22 @@ async function checkTrade(
   portfolioId: string,
   holdingId: string,
   dateInput: unknown,
-  side: Side
-): Promise<{ ok: true; holding: HoldingRow; assetClass: AssetClass } | { ok: false; error: string }> {
+  side: Side,
+  atInput: unknown = null
+): Promise<
+  | { ok: true; holding: HoldingRow; assetClass: AssetClass; item: { ticker: string; assetClass: AssetClass; venue: string | null }; at: number | null }
+  | { ok: false; error: string }
+> {
   const holding = await findHolding(supabase, portfolioId, holdingId)
   if (!holding) return { ok: false, error: 'Holding not found.' }
   if (!(await canEdit(supabase, userId, portfolioId))) return { ok: false, error: VIEW_ONLY }
   const assetClass = toAssetClass(holding.asset_class)
   if (kindOf(assetClass) === 'cash') return { ok: false, error: 'Cash isn’t bought or sold. Use Add money or Take money out.' }
-  const problem = tradeDateProblem(side, dateInput, String(holding.opened_at), marketDate())
+  const moment = readMoment(atInput, String(dateInput))
+  if (!moment.ok) return moment
+  const problem = tradeDateProblem(side, dateInput, String(holding.opened_at), moment.at)
   if (problem) return { ok: false, error: problem }
-  return { ok: true, holding, assetClass }
+  return { ok: true, holding, assetClass, item: { ticker: holding.ticker, assetClass, venue: venueOf(holding) }, at: moment.at }
 }
 
 /**
@@ -874,32 +1065,49 @@ export async function getTradePrice(
   portfolioId: string,
   holdingId: string,
   dateInput: string,
-  side: Side
+  side: Side,
+  /** The moment it happened (ISO), when a time was given. */
+  atInput?: string | null
 ): Promise<DatedPrice> {
   const { supabase, user } = await requireUser()
   if (!user) return { ok: false, error: SIGNED_OUT }
-  const found = await checkTrade(supabase, user.id, portfolioId, holdingId, dateInput, side === 'buy' ? 'buy' : 'sell')
+  const found = await checkTrade(supabase, user.id, portfolioId, holdingId, dateInput, side === 'buy' ? 'buy' : 'sell', atInput)
   if (!found.ok) return found
-  return datedPrice(
-    { ticker: found.holding.ticker, assetClass: found.assetClass },
-    dateInput,
-    marketDate(),
-    savedCloses(supabase),
-    await getMoney()
-  )
+  return datedPrice(found.item, dateInput, marketDate(), savedCloses(supabase), await getMoney(), found.at)
 }
 
 /** The price of something not yet held, on a date: for "Add a holding" when it was just bought. */
-export async function getPriceOn(symbolInput: string, classInput: string, dateInput: string): Promise<DatedPrice> {
+export async function getPriceOn(
+  symbolInput: string,
+  classInput: string,
+  dateInput: string,
+  options: { at?: string | null; exchange?: string | null; market?: string | null } = {}
+): Promise<DatedPrice> {
   const { supabase, user } = await requireUser()
   if (!user) return { ok: false, error: SIGNED_OUT }
   const assetClass = toAssetClass(classInput)
-  const ticker = typeof symbolInput === 'string' ? normalizeAssetSymbol(symbolInput, assetClass) : null
+  const kind = kindOf(assetClass)
+  const ticker =
+    typeof symbolInput !== 'string'
+      ? null
+      : kind === 'listed'
+        ? listedTicker(symbolInput, options.market)
+        : normalizeAssetSymbol(symbolInput, assetClass)
   if (!ticker) return { ok: false, error: 'Enter what you bought first.' }
   const today = marketDate()
-  const problem = tradeDateProblem('buy', dateInput, '1970-01-01', today)
+  const moment = readMoment(options.at, dateInput)
+  if (!moment.ok) return moment
+  const problem = tradeDateProblem('buy', dateInput, '1970-01-01', moment.at)
   if (problem) return { ok: false, error: problem }
-  return datedPrice({ ticker, assetClass }, dateInput, today, savedCloses(supabase), await getMoney())
+  const venue = kind === 'crypto' ? toVenueId(options.exchange) : null
+  return datedPrice({ ticker, assetClass, venue }, dateInput, today, savedCloses(supabase), await getMoney(), moment.at)
+}
+
+/** For the exchange picker: every exchange that trades a coin, with its live price there. */
+export async function getExchanges(coinInput: string): Promise<VenueOption[]> {
+  const { user } = await requireUser()
+  const coin = user && typeof coinInput === 'string' ? normalizeAssetSymbol(coinInput, 'crypto') : null
+  return coin ? venuesFor(coin) : []
 }
 
 /**
@@ -915,7 +1123,7 @@ export async function sellHolding(
   holdingId: string,
   quantityInput: string,
   dateInput: string,
-  options: { into?: string; manualPrice?: string } = {}
+  options: { into?: string; manualPrice?: string; at?: string | null } = {}
 ): Promise<SaleResult> {
   const { supabase, user } = await requireUser()
   if (!user) return { ok: false, error: SIGNED_OUT }
@@ -925,7 +1133,7 @@ export async function sellHolding(
     return { ok: false, error: 'Enter how much you sold, more than zero.' }
   }
 
-  const found = await checkTrade(supabase, user.id, portfolioId, holdingId, dateInput, 'sell')
+  const found = await checkTrade(supabase, user.id, portfolioId, holdingId, dateInput, 'sell', options.at)
   if (!found.ok) return found
   const { holding, assetClass } = found
   const held = Number(holding.quantity)
@@ -933,7 +1141,7 @@ export async function sellHolding(
     return { ok: false, error: `You only hold ${formatShares(held)}. Enter that or less.` }
   }
 
-  const priced = await resolvePrice(supabase, { ticker: holding.ticker, assetClass }, dateInput, options.manualPrice)
+  const priced = await resolvePrice(supabase, found.item, dateInput, options.manualPrice, found.at)
   if (!priced.ok) return priced
   const price = priced.value.price
 
@@ -982,6 +1190,7 @@ export async function sellHolding(
     costBasis: holding.cost_basis === null ? null : Number(holding.cost_basis),
     quantityBefore: held,
     tradeDate: dateInput,
+    tradedAt: found.at !== null ? new Date(found.at * 1000).toISOString() : null,
     cashChange: intoAmount,
     cashCurrency: into,
   })
@@ -1014,6 +1223,8 @@ export async function buyMore(
     manualPrice?: string
     /** Entered as money spent instead of a quantity: the quantity is worked out from the price. */
     spend?: { amount: string; currency: string }
+    /** The moment it was bought (ISO), when a time was given. */
+    at?: string | null
   } = {}
 ): Promise<BuyResult> {
   const { supabase, user } = await requireUser()
@@ -1024,10 +1235,10 @@ export async function buyMore(
     return { ok: false, error: 'Enter how much you bought, more than zero.' }
   }
 
-  const found = await checkTrade(supabase, user.id, portfolioId, holdingId, dateInput, 'buy')
+  const found = await checkTrade(supabase, user.id, portfolioId, holdingId, dateInput, 'buy', options.at)
   if (!found.ok) return found
   const { holding, assetClass } = found
-  const priced = await resolvePrice(supabase, { ticker: holding.ticker, assetClass }, dateInput, options.manualPrice)
+  const priced = await resolvePrice(supabase, found.item, dateInput, options.manualPrice, found.at)
   if (!priced.ok) return priced
   const price = priced.value.price
   let spent: { amount: number; currency: string } | null = null
@@ -1081,12 +1292,277 @@ export async function buyMore(
     costBasis: holding.cost_basis === null ? null : Number(holding.cost_basis),
     quantityBefore: Number(holding.quantity),
     tradeDate: dateInput,
+    tradedAt: found.at !== null ? new Date(found.at * 1000).toISOString() : null,
     cashChange: payFrom ? -paidAmount : 0,
     cashCurrency: payFrom ?? 'USD',
   })
 
   refresh(portfolioId)
   return { ok: true, cost: buy.cost, price, quantity, paidFrom: payFrom, paidAmount }
+}
+
+// ---------------------------------------------------------------------------
+// Editing an entry in a holding's history
+// ---------------------------------------------------------------------------
+
+const EDITS_NOT_SET_UP =
+  'Editing past entries needs one more database script. Run supabase/edits.sql in the Supabase SQL editor.'
+
+/** What an edit may change. Blank or missing fields stay as they were. */
+export interface EntryEdit {
+  /** YYYY-MM-DD */
+  date: string
+  /** The moment it happened (ISO), or null for no time. */
+  at: string | null
+  quantity: string
+  /** An opening entry for something already owned: its average cost, and the currency it is typed in. */
+  cost?: string
+  costCurrency?: string
+  /** Only when no market price can be found for the new date. */
+  manualPrice?: string
+}
+
+/** An entry, the holding it belongs to, and everything else on record for that asset. */
+async function loadEntry(
+  supabase: Supabase,
+  userId: string,
+  portfolioId: string,
+  entryId: string
+): Promise<
+  | { ok: true; entry: HistoryEntry; all: HistoryEntry[]; holding: HoldingRow; assetClass: AssetClass }
+  | { ok: false; error: string }
+> {
+  if (!isUuid(portfolioId) || !isUuid(entryId)) return { ok: false, error: 'Entry not found.' }
+  if (!(await canEdit(supabase, userId, portfolioId))) return { ok: false, error: VIEW_ONLY }
+  const { data: row, error } = await supabase
+    .from('holding_history')
+    .select('*')
+    .eq('id', entryId)
+    .eq('portfolio_id', portfolioId)
+    .maybeSingle()
+  if (error || !row) return { ok: false, error: 'Entry not found.' }
+  const entry = toHistoryEntry(row)
+  if (!entry) return { ok: false, error: 'Entry not found.' }
+  if (!isEditable(entry) || kindOf(entry.assetClass) === 'cash') {
+    return { ok: false, error: 'Only a purchase, a sale, or how a holding started can be edited. Use Fix a mistake for the rest.' }
+  }
+
+  const { data: rows, error: allError } = await supabase
+    .from('holding_history')
+    .select('*')
+    .eq('portfolio_id', portfolioId)
+    .eq('asset_key', entry.assetKey)
+  if (allError) return { ok: false, error: 'Could not read the history. Try again.' }
+  const all = (rows ?? []).map(toHistoryEntry).filter((e): e is HistoryEntry => e !== null)
+
+  const { data: holdings } = await supabase.from('holdings').select('*').eq('portfolio_id', portfolioId).eq('ticker', entry.ticker)
+  const holding = ((holdings ?? []) as HoldingRow[]).find(
+    (h) => priceKey(h.ticker, toAssetClass(h.asset_class)) === entry.assetKey
+  )
+  if (!holding) {
+    return { ok: false, error: `${entry.ticker} is no longer held, so its past entries can’t be edited. Add it again to start a new record.` }
+  }
+  return { ok: true, entry, all, holding, assetClass: toAssetClass(holding.asset_class) }
+}
+
+/** Whether the date or time of an entry is being changed (both are compared as moments). */
+function movesInTime(entry: HistoryEntry, date: string, at: number | null): boolean {
+  const was = entry.tradedAt ? Math.floor(Date.parse(entry.tradedAt) / 1000) : null
+  return date !== entry.tradeDate || was !== at
+}
+
+/** True for an opening entry typed in from a broker's average cost, rather than priced from the market. */
+const typedCost = (entry: HistoryEntry) => entry.kind === 'opened' && entry.priceSource === null
+
+/**
+ * For the edit form: the price an entry would be recorded at on a new date
+ * and time. Today's live price, else the price at that moment or the day's close.
+ */
+export async function getEntryPrice(portfolioId: string, entryId: string, dateInput: string, atInput: string | null): Promise<DatedPrice> {
+  const { supabase, user } = await requireUser()
+  if (!user) return { ok: false, error: SIGNED_OUT }
+  const found = await loadEntry(supabase, user.id, portfolioId, entryId)
+  if (!found.ok) return found
+  const moment = readMoment(atInput, dateInput)
+  if (!moment.ok) return moment
+  const problem = dateProblem(dateInput, 'date', moment.at)
+  if (problem) return { ok: false, error: problem }
+  return datedPrice(
+    { ticker: found.holding.ticker, assetClass: found.assetClass, venue: venueOf(found.holding) },
+    dateInput,
+    marketDate(),
+    savedCloses(supabase),
+    await getMoney(),
+    moment.at
+  )
+}
+
+/**
+ * Corrects a purchase, a sale, or how a holding started: its date, time, and
+ * amount (and, for something already owned, its average cost). A purchase or
+ * sale moved to another date or time is priced again there, as Buy and Sell
+ * price one. The holding and the cash it was paid from or into move by exactly
+ * what the edit changes, and later sales have their gain measured again. The
+ * database keeps the entry as it was (supabase/edits.sql).
+ */
+export async function editHistoryEntry(portfolioId: string, entryId: string, input: EntryEdit): Promise<ActionResult> {
+  const { supabase, user } = await requireUser()
+  if (!user) return { ok: false, error: SIGNED_OUT }
+  const found = await loadEntry(supabase, user.id, portfolioId, entryId)
+  if (!found.ok) return found
+  const { entry, all, holding, assetClass } = found
+
+  const date = typeof input?.date === 'string' ? input.date : ''
+  const moment = readMoment(input?.at ?? null, date)
+  if (!moment.ok) return moment
+  const badDate = dateProblem(date, 'date', moment.at)
+  if (badDate) return { ok: false, error: badDate }
+  const quantity = Number(input.quantity)
+  if (!Number.isFinite(quantity) || quantity <= 0 || quantity > 1e12) return { ok: false, error: 'Enter an amount greater than zero.' }
+
+  // The price: typed for something already owned; otherwise from the market, again if the date or time moved.
+  let price = entry.price
+  let priceDate = entry.priceDate
+  let priceSource = entry.priceSource
+  if (typedCost(entry)) {
+    const costText = typeof input.cost === 'string' ? input.cost.trim() : ''
+    if (costText === '') price = null
+    else {
+      const cost = Number(costText)
+      if (!Number.isFinite(cost) || cost <= 0 || cost > 1e12) {
+        return { ok: false, error: 'Average cost must be a number greater than zero, or left blank.' }
+      }
+      const currency = input.costCurrency && isCurrency(input.costCurrency) ? input.costCurrency : 'USD'
+      const rate = await rateFor(currency, date)
+      if (rate === null) return { ok: false, error: NO_RATE(currency) }
+      price = cost / rate
+    }
+  } else if (movesInTime(entry, date, moment.at) || price === null) {
+    const priced = await resolvePrice(
+      supabase,
+      { ticker: holding.ticker, assetClass, venue: venueOf(holding) },
+      date,
+      input.manualPrice,
+      moment.at
+    )
+    if (!priced.ok) return priced
+    price = priced.value.price
+    priceDate = priced.value.priceDate
+    priceSource = priced.value.source ?? ENTERED
+  }
+
+  // The cash it moved, if it was paid from or into cash: the same line, the new amount.
+  let cashChange = entry.cashChange
+  if (entry.cashChange !== 0 && price !== null) {
+    const rate = await rateFor(entry.cashCurrency, date)
+    if (rate === null) return { ok: false, error: NO_RATE(entry.cashCurrency) }
+    cashChange = (entry.kind === 'sold' ? 1 : -1) * quantity * price * rate
+  }
+
+  const edited: HistoryEntry = {
+    ...entry,
+    quantity,
+    price,
+    priceDate,
+    priceSource,
+    tradeDate: date,
+    tradedAt: moment.at !== null ? new Date(moment.at * 1000).toISOString() : null,
+    cashChange,
+  }
+  const others = all.filter((e) => e.id !== entry.id)
+  // An opening entry sets the amount held outright, so nothing may be moved across it.
+  const earlier = (a: HistoryEntry, b: HistoryEntry) => a.tradeDate < b.tradeDate || (a.tradeDate === b.tradeDate && a.createdAt <= b.createdAt)
+  if (entry.kind === 'opened') {
+    const later = others.filter((e) => e.kind !== 'opened' && e.kind !== 'removed' && earlier(entry, e)).map((e) => e.tradeDate).sort()[0]
+    if (later && date > later) {
+      return { ok: false, error: `That is after a later purchase or sale, on ${formatDate(later)}. Edit or check that one first.` }
+    }
+  } else {
+    const opening = others.filter((e) => e.kind === 'opened' && earlier(e, entry)).map((e) => e.tradeDate).sort().at(-1)
+    if (opening && date < opening) {
+      return { ok: false, error: `That is before ${entry.ticker} was first recorded, on ${formatDate(opening)}. Edit that entry first.` }
+    }
+  }
+  const before = replayAsset(all)
+  const after = replayAsset([...others, edited])
+  if (after.oversold) {
+    return { ok: false, error: 'With that change, a sale would be for more than was held at the time. Check the date and amount.' }
+  }
+  const next = holdingAfterEdit(
+    { quantity: Number(holding.quantity), costBasis: holding.cost_basis === null ? null : Number(holding.cost_basis) },
+    before,
+    after
+  )
+  if (next.quantity <= 0) {
+    return { ok: false, error: 'That would leave none held. To record selling all of it, use Sell instead.' }
+  }
+
+  // 1. The cash moves by the difference; refused if the cash doesn't cover a bigger purchase.
+  const cashDelta = cashChange - entry.cashChange
+  let undoCash = async () => {}
+  if (Math.abs(cashDelta) >= 0.005) {
+    const cash = await moveCash(supabase, portfolioId, entry.cashCurrency, cashDelta, { openedAt: date, short: SHORT_TO_PAY(entry.cashCurrency) })
+    if (!cash.ok) return cash
+    undoCash = cash.undo
+  }
+
+  // 2. The holding: its amount, average cost, and when it started.
+  const original = { quantity: holding.quantity, cost_basis: holding.cost_basis, opened_at: holding.opened_at }
+  const { error: holdingError } = await supabase
+    .from('holdings')
+    .update({ quantity: next.quantity, cost_basis: next.costBasis, ...(after.since ? { opened_at: after.since } : {}) })
+    .eq('id', holding.id)
+    .eq('portfolio_id', portfolioId)
+  if (holdingError) {
+    await undoCash()
+    return { ok: false, error: 'Could not update the holding. Nothing was changed. Try again.' }
+  }
+
+  // 3. The entry itself. The database keeps the version before it.
+  const name = await displayName(supabase, user)
+  const atSale = after.atSale.get(entry.id)
+  const { data, error } = await supabase
+    .from('holding_history')
+    .update({
+      quantity,
+      price,
+      price_date: priceDate,
+      price_source: priceSource,
+      trade_date: date,
+      traded_at: edited.tradedAt,
+      cash_change: cashChange,
+      ...(entry.kind === 'sold' && atSale ? { cost_basis: atSale.costBasis, quantity_before: atSale.quantityBefore } : {}),
+      edited_name: name,
+      edit_note: null,
+    })
+    .eq('id', entry.id)
+    .eq('portfolio_id', portfolioId)
+    .select('id')
+  // An update the access rules don't allow changes no row and says nothing, so the row count is checked too.
+  if (error || !data || data.length !== 1) {
+    await supabase.from('holdings').update(original).eq('id', holding.id)
+    await undoCash()
+    const notSetUp = !error || missingColumn(error) || error.code === '42501' || /permission|policy/i.test(error.message ?? '')
+    return { ok: false, error: notSetUp ? EDITS_NOT_SET_UP : 'Could not save the change. Nothing was changed. Try again.' }
+  }
+
+  // 4. Later sales are measured against the average cost as it now was then. Best effort.
+  for (const other of others) {
+    const at = after.atSale.get(other.id)
+    if (other.kind !== 'sold' || !at) continue
+    const same =
+      (at.costBasis === null ? other.costBasis === null : other.costBasis !== null && Math.abs(at.costBasis - other.costBasis) < 1e-9) &&
+      Math.abs(at.quantityBefore - (other.quantityBefore ?? at.quantityBefore)) < 1e-9
+    if (same) continue
+    await supabase
+      .from('holding_history')
+      .update({ cost_basis: at.costBasis, quantity_before: at.quantityBefore, edited_name: name, edit_note: 'recalculated' })
+      .eq('id', other.id)
+      .eq('portfolio_id', portfolioId)
+  }
+
+  refresh(portfolioId)
+  return { ok: true }
 }
 
 // ---------------------------------------------------------------------------
@@ -1444,9 +1920,19 @@ export async function leavePortfolio(memberId: string): Promise<ActionResult> {
   return { ok: true }
 }
 
-/** Ticker suggestions for the holding form. */
-export async function suggestSymbols(query: string): Promise<SymbolMatch[]> {
+/**
+ * Ticker suggestions for the holding form, on the market chosen: Finnhub for
+ * the US, Yahoo Finance elsewhere. Outside the US the ticker is given without
+ * its market suffix (D05, not D05.SI), as people type it.
+ */
+export async function suggestSymbols(query: string, marketInput?: string): Promise<SymbolMatch[]> {
   const { user } = await requireUser()
   if (!user || typeof query !== 'string') return []
-  return searchSymbols(query.slice(0, 40), 8)
+  const market = stockMarket(marketInput) ?? US_MARKET
+  if (!market.suffix) return searchSymbols(query.slice(0, 40), 8)
+  const matches = await yahooSearch(query.slice(0, 40))
+  return matches
+    .filter((m) => m.symbol.endsWith(market.suffix))
+    .slice(0, 8)
+    .map((m) => ({ symbol: localTicker(m.symbol), description: m.name, type: m.type }))
 }

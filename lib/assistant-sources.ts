@@ -43,14 +43,21 @@ export async function gatherSources(
 
   // The sources the page's own prices came from, one entry each, listed first.
   const day = formatDate(marketDate())
-  const bySource = new Map<string, { url: string; listed: string[]; coins: string[]; direct: string[]; metals: string[]; cash: string[] }>()
+  const bySource = new Map<
+    string,
+    { url: string; listed: string[]; abroad: string[]; coins: string[]; venue: string[]; direct: string[]; metals: string[]; cash: string[] }
+  >()
   for (const h of view.holdings) {
     const source = h.priceSource
     // A saved price has no outside source to cite; the data marks it as unpriced or stale.
     if (!source || source.saved || h.price === null || !source.url.startsWith('http')) continue
-    const entry = bySource.get(source.name) ?? { url: source.url, listed: [], coins: [], direct: [], metals: [], cash: [] }
+    const entry =
+      bySource.get(source.name) ?? { url: source.url, listed: [], abroad: [], coins: [], venue: [], direct: [], metals: [], cash: [] }
     const kind = kindOf(h.assetClass)
-    if (source.pair) entry.direct.push(source.pair)
+    // The exchange chosen for a coin, then a coin quoted directly in the display currency.
+    if (source.venue && source.pair) entry.venue.push(source.pair)
+    else if (source.pair) entry.direct.push(source.pair)
+    else if (kind === 'listed' && source.currency) entry.abroad.push(`${h.ticker} (in ${source.currency})`)
     else if (kind === 'listed') entry.listed.push(h.ticker)
     else if (kind === 'crypto') entry.coins.push(h.ticker)
     else if (kind === 'metal') entry.metals.push(h.ticker)
@@ -60,7 +67,10 @@ export async function gatherSources(
   for (const [publisher, e] of bySource) {
     const parts = [
       e.listed.length > 0 && `the prices, values, company names, and sector labels of ${list(e.listed)} (in US dollars)`,
+      e.abroad.length > 0 && `the prices, values, company names, and sector labels of ${list(e.abroad)}, converted to US dollars`,
       e.coins.length > 0 && `the prices, values, and 24-hour changes of ${list(e.coins)} (in US dollars)`,
+      e.venue.length > 0 &&
+        `the prices, values, and 24-hour changes of ${list(e.venue.map((p) => p.split('/')[0]))} on its ${list(e.venue)} market${e.venue.length > 1 ? 's' : ''}, the exchange chosen for them, converted to US dollars`,
       e.direct.length > 0 && `the prices and values of ${list(e.direct.map((p) => p.split('/')[0]))}, quoted directly in ${e.direct[0].split('/')[1]} on its ${list(e.direct)} market${e.direct.length > 1 ? 's' : ''}`,
       e.metals.length > 0 && `the prices and values of ${list(e.metals)} per troy ounce (in US dollars)`,
       e.cash.length > 0 && `the exchange rates behind the value of the ${list(e.cash)} cash`,

@@ -1,12 +1,15 @@
 'use client'
 
+import { useSyncExternalStore } from 'react'
 import { ArrowDownToLine, ArrowUpFromLine, ChevronRight, Flag, HandCoins, PencilLine, ShoppingCart, Trash2 } from 'lucide-react'
 import { useMoney } from '@/app/components/money'
 import Delta from '@/app/components/portfolio/delta'
 import { METALS, kindOf, unitName, type AssetClass } from '@/lib/assets'
 import { CURRENCIES, money as inCurrency } from '@/lib/currency'
 import { formatDate, formatDayDate, formatMoney, formatShares } from '@/lib/format'
-import { ENTERED, saleGain, type HistoryEntry } from '@/lib/history'
+import { ENTERED, isEditable, purposeWord, saleGain, takesPurpose, type HistoryEntry } from '@/lib/history'
+import EditEntryDialog from '@/app/components/portfolio/edit-entry-dialog'
+import PurposeDialog from '@/app/components/portfolio/purpose-dialog'
 
 /** What the history panel needs to know about the page. */
 export interface HistoryContext {
@@ -15,8 +18,11 @@ export interface HistoryContext {
   entries: HistoryEntry[]
   /** The signed-in person, so their own entries read "by you". */
   me: string | null
-  /** Owners and editors are told how to turn history on. */
+  /** Owners and editors are told how to turn history on, and can edit entries. */
   canEdit: boolean
+  /** Set where entries can be edited: the portfolio, and today in New York. */
+  portfolioId?: string
+  today?: string
 }
 
 const ICONS = {
@@ -102,6 +108,18 @@ export function Expand({ open, id, children }: { open: boolean; id: string; chil
   )
 }
 
+const noop = () => () => {}
+
+/**
+ * A trade's time of day, in the viewer's own time zone. Only in the browser:
+ * the server doesn't know the viewer's zone, so it renders without the time.
+ */
+function useTimeOf(): (iso: string) => string | null {
+  const browser = useSyncExternalStore(noop, () => true, () => false)
+  return (iso) =>
+    browser ? new Date(iso).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit', timeZoneName: 'short' }) : null
+}
+
 /** The list of entries for one holding (or one cash line), newest first. */
 export default function HoldingHistory({
   entries,
@@ -114,6 +132,7 @@ export default function HoldingHistory({
   asset: { ticker: string; assetClass: AssetClass }
 }) {
   const money = useMoney()
+  const timeOf = useTimeOf()
   const isCash = kindOf(asset.assetClass) === 'cash'
 
   if (!context.available) {
@@ -128,12 +147,21 @@ export default function HoldingHistory({
     return <p className="text-sm text-zinc-500 dark:text-zinc-400">Nothing recorded yet.</p>
   }
 
-  /** "the close on Fri, Nov 13, 2026, from Yahoo Finance", "the live price, from Finnhub", or a typed price. */
+  /**
+   * "the close on Fri, Nov 13, 2026, from Yahoo Finance", "the price at 4:32 PM,
+   * from Binance (BTC/USDT)", "the live price, from Finnhub", or a typed price.
+   */
   const pricedFrom = (e: HistoryEntry) =>
     e.priceSource === ENTERED
       ? 'a price entered by hand, as no market price was found'
       : e.priceSource
-        ? `${e.priceDate ? `the close on ${formatDayDate(e.priceDate)}` : 'the live price'}, from ${e.priceSource}`
+        ? `${
+            e.priceDate
+              ? `the close on ${formatDayDate(e.priceDate)}`
+              : e.tradedAt
+                ? `the price at ${timeOf(e.tradedAt) ?? 'the time given'}`
+                : 'the live price'
+          }, from ${e.priceSource}`
         : null
   /** Money moved, in the currency of the cash line it went through. */
   const cashAmount = (e: HistoryEntry, value: number) => inCurrency(value, { code: e.cashCurrency, rate: 1 })
@@ -157,7 +185,7 @@ export default function HoldingHistory({
             detail: isCash ? null : each ? `Average cost ${each}, as entered.` : 'Average cost not recorded.',
           }
         }
-        if (isCash) return { title: `Added ${amountOf(e, e.quantity)}`, detail: null }
+        if (isCash) return { title: `Added ${amountOf(e, e.quantity)}`, detail: e.purpose ? `From: ${e.purpose}` : null }
         if (source) {
           return {
             title: `Bought ${amountOf(e, e.quantity)}, a new holding`,
@@ -194,9 +222,9 @@ export default function HoldingHistory({
         return { title: 'Corrected by hand', detail: text ? `Changed the ${text}.` : null }
       }
       case 'deposited':
-        return { title: `Added ${amountOf(e, e.quantity)}`, detail: null }
+        return { title: `Added ${amountOf(e, e.quantity)}`, detail: e.purpose ? `From: ${e.purpose}` : null }
       case 'withdrawn':
-        return { title: `Took out ${amountOf(e, e.quantity)}`, detail: null }
+        return { title: `Took out ${amountOf(e, e.quantity)}`, detail: e.purpose ? `For: ${e.purpose}` : null }
       case 'removed':
         return {
           title: 'Removed from the portfolio',
@@ -262,10 +290,38 @@ export default function HoldingHistory({
               <div className="min-w-0 basis-72 flex-1">
                 <p className="text-sm font-medium text-black dark:text-zinc-50">{title}</p>
                 {detail && <p className="mt-0.5 text-xs leading-5 text-zinc-600 dark:text-zinc-400">{detail}</p>}
-                <p className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">
-                  {formatDate(e.tradeDate)}
-                  {by ? `, by ${by}` : ''}
+                <p className="mt-0.5 flex flex-wrap items-center gap-x-2 text-xs text-zinc-500 dark:text-zinc-400">
+                  <span>
+                    {formatDate(e.tradeDate)}
+                    {e.tradedAt && timeOf(e.tradedAt) ? `, ${timeOf(e.tradedAt)}` : ''}
+                    {by ? `, by ${by}` : ''}
+                  </span>
+                  {!isCash && context.canEdit && context.portfolioId && context.today && isEditable(e) && (
+                    <EditEntryDialog portfolioId={context.portfolioId} entry={e} today={context.today} />
+                  )}
+                  {takesPurpose(e) && context.canEdit && context.portfolioId && (
+                    <PurposeDialog portfolioId={context.portfolioId} entry={e} />
+                  )}
                 </p>
+                {e.editedAt && (
+                  <p className="mt-0.5 text-xs italic leading-5 text-zinc-500 dark:text-zinc-400">
+                    {e.editNote === 'recalculated'
+                      ? 'Its gain was worked out again after an earlier entry was edited.'
+                      : e.editNote === 'purpose'
+                        ? `${purposeWord(e.kind) === 'For' ? 'Purpose' : 'Source'} ${e.before?.purpose ? (e.purpose ? 'changed' : 'removed') : 'added'}${
+                            e.editedName ? ` by ${e.editedName}` : ''
+                          } on ${formatDate(e.editedAt)}${e.before?.purpose ? `. Before: “${e.before.purpose}”.` : '.'}`
+                        : `Edited${e.editedName ? ` by ${e.editedName}` : ''} on ${formatDate(e.editedAt)}${
+                          e.before
+                            ? `. Before: ${e.before.quantity !== null ? amountOf(e, e.before.quantity) : ''}${
+                                e.before.tradeDate ? ` on ${formatDate(e.before.tradeDate)}` : ''
+                              }${e.before.tradedAt && timeOf(e.before.tradedAt) ? `, ${timeOf(e.before.tradedAt)}` : ''}${
+                                e.before.price !== null ? `, at ${formatMoney(e.before.price, money)}` : ''
+                              }.`
+                            : '.'
+                        }`}
+                  </p>
+                )}
               </div>
               <div className="text-right text-sm tabular-nums">
                 {figure(e)}

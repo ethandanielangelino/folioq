@@ -38,6 +38,7 @@ import {
 import { saleDateProblem } from '@/lib/sale-date'
 import type { DatedPrice } from '@/lib/dated-price'
 import Delta from '@/app/components/portfolio/delta'
+import { MomentRange, TimeField, aheadOfNewYork, basisWords, inFuture, momentOf, useLatestDate } from '@/app/dashboard/[id]/trade-time'
 
 export interface TradableHolding {
   id: string
@@ -49,7 +50,10 @@ export interface TradableHolding {
   openedAt: string
 }
 
-type Quote = { status: 'idle' } | { status: 'loading'; date: string } | { status: 'done'; date: string; result: DatedPrice }
+/** `asked` is the date and the moment (if a time was given) the price is for. */
+type Quote = { status: 'idle' } | { status: 'loading'; asked: string } | { status: 'done'; asked: string; result: DatedPrice }
+
+const askedFor = (date: string, moment: string | null) => `${date}|${moment ?? ''}`
 
 /** Today where the person is, YYYY-MM-DD. Only read once the dialog is open, in the browser. */
 function localDate(): string {
@@ -63,6 +67,8 @@ const choice = (on: boolean) =>
       ? 'border-black bg-black text-white dark:border-white dark:bg-white dark:text-black'
       : 'border-black/[.1] text-zinc-700 hover:border-black/30 dark:border-white/[.15] dark:text-zinc-300'
   }`
+
+const capitalised = (words: string) => words.charAt(0).toUpperCase() + words.slice(1)
 
 /** Shown in the preview: a line with a lead-in and a figure. */
 function Line({ children }: { children: React.ReactNode }) {
@@ -139,12 +145,14 @@ export function TradeForm({
   const startDate = initial?.date ?? today
   const [quantity, setQuantity] = useState(startQuantity)
   const [date, setDate] = useState(startDate)
+  // The time of day the order filled, in the person's time zone; blank for the day's price.
+  const [fillTime, setFillTime] = useState('')
   // Null until the person chooses: until then it follows the defaults, even if
   // the cash figures arrive after the dialog opened.
   const [payChoice, setPayChoice] = useState<string | null>(initial?.payFrom ?? null)
   const [intoChoice, setIntoChoice] = useState<string | null>(initial?.into ?? null)
   const [manualPrice, setManualPrice] = useState('')
-  const [quote, setQuote] = useState<Quote>({ status: 'loading', date: startDate })
+  const [quote, setQuote] = useState<Quote>({ status: 'loading', asked: askedFor(startDate, null) })
   // A purchase can be entered as the money spent; FolioQ works out how many.
   const [enterBy, setEnterBy] = useState<EnterBy>(buying && initial?.spend ? 'money' : 'units')
   const [spend, setSpend] = useState(initial?.spend ? String(initial.spend.amount) : '')
@@ -158,16 +166,23 @@ export function TradeForm({
   const name = kindOf(holding.assetClass) === 'metal' ? (METALS[holding.ticker] ?? holding.ticker) : holding.ticker
   const units = unitName(holding.assetClass, 2)
   const unit = unitName(holding.assetClass, 1)
-  const dateRules = { openedAt: buying ? '1970-01-01' : holding.openedAt, today }
+  // With a time, the date may be the person's own, a day ahead of New York.
+  const latest = useLatestDate(today)
+  const rulesFor = (time: string) => ({ openedAt: buying ? '1970-01-01' : holding.openedAt, today: time ? latest : today })
+  const dateRules = rulesFor('')
 
   const payFrom = buying ? (payChoice ?? defaultPayFrom(cashLines, display)) : OUTSIDE
   const into = buying ? null : (intoChoice ?? display)
   const cashCurrency = buying ? (payFrom === OUTSIDE ? null : payFrom) : into
   const rate = useRate(cashCurrency, date)
 
-  const dateProblem = saleDateProblem(date, dateRules)
-  const market = quote.status === 'done' && quote.date === date && quote.result.ok ? quote.result : null
-  const noMarketPrice = quote.status === 'done' && quote.date === date && !quote.result.ok
+  const dateProblem =
+    date > today && !fillTime && date <= latest ? aheadOfNewYork(today) : saleDateProblem(date, rulesFor(fillTime))
+  const moment = momentOf(date, fillTime)
+  const timeInFuture = inFuture(moment)
+  const now = askedFor(date, moment)
+  const market = quote.status === 'done' && quote.asked === now && quote.result.ok ? quote.result : null
+  const noMarketPrice = quote.status === 'done' && quote.asked === now && !quote.result.ok
   const typed = Number(manualPrice)
   const typedPrice = noMarketPrice && typed > 0 && Number.isFinite(typed) ? typed : null
   const price = market?.price ?? typedPrice
@@ -193,20 +208,24 @@ export function TradeForm({
     usd !== null && typeof rate === 'number' ? (byMoney && cashCurrency !== null ? spent : usd * rate) : null
   const shortOfCash = buying && payFrom !== OUTSIDE && inCash !== null && !cashCovers(line?.amount ?? 0, inCash)
   const ready =
-    (buying ? buy !== null && !shortOfCash : sale !== null) && (cashCurrency === null || typeof rate === 'number')
+    !timeInFuture &&
+    (buying ? buy !== null && !shortOfCash : sale !== null) &&
+    (cashCurrency === null || typeof rate === 'number')
 
-  function lookUp(next: string, wait: number) {
+  function lookUp(next: string, time: string, wait: number) {
     if (timer.current) clearTimeout(timer.current)
     const id = ++asked.current
-    if (saleDateProblem(next, dateRules)) {
+    const at = momentOf(next, time)
+    if (saleDateProblem(next, rulesFor(time)) || inFuture(at)) {
       setQuote({ status: 'idle' })
       return
     }
-    setQuote({ status: 'loading', date: next })
-    // A short wait while the date is still being typed, digit by digit.
+    const key = askedFor(next, at)
+    setQuote({ status: 'loading', asked: key })
+    // A short wait while the date or time is still being typed, digit by digit.
     timer.current = setTimeout(async () => {
-      const result = await getTradePrice(portfolioId, holding.id, next, side)
-      if (id === asked.current) setQuote({ status: 'done', date: next, result })
+      const result = await getTradePrice(portfolioId, holding.id, next, side, at)
+      if (id === asked.current) setQuote({ status: 'done', asked: key, result })
     }, wait)
   }
 
@@ -218,7 +237,7 @@ export function TradeForm({
     } else {
       timer.current = setTimeout(async () => {
         const result = await getTradePrice(portfolioId, holding.id, startDate, side)
-        if (id === asked.current) setQuote({ status: 'done', date: startDate, result })
+        if (id === asked.current) setQuote({ status: 'done', asked: askedFor(startDate, null), result })
       }, 0)
     }
     return () => {
@@ -232,8 +251,18 @@ export function TradeForm({
     setDate(next)
     setError('')
     setManualPrice('')
-    lookUp(next, 350)
+    lookUp(next, fillTime, 350)
   }
+
+  function changeTime(next: string) {
+    setFillTime(next)
+    setError('')
+    setManualPrice('')
+    lookUp(date, next, 350)
+  }
+
+  /** " at 4:32 PM", when a time was given. */
+  const atText = moment ? ` at ${new Date(moment).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}` : ''
 
   function onSubmit(event: React.FormEvent) {
     event.preventDefault()
@@ -244,6 +273,7 @@ export function TradeForm({
         const result = await buyMore(portfolioId, holding.id, byMoney ? '' : quantity, date, {
           payFrom: payFrom === OUTSIDE ? null : payFrom,
           manualPrice: typedIn,
+          at: moment,
           ...(byMoney ? { spend: { amount: spend, currency: spendCurrency } } : {}),
         })
         if (!result.ok) return setError(result.error)
@@ -253,20 +283,21 @@ export function TradeForm({
         // Close (and confirm) in the same transition as the refreshed page, so the
         // dialog stays on "Recording…" until the new numbers are showing.
         startTransition(() =>
-          onDone({ toast: said, record: `${said}, on ${formatDate(date)} at ${formatMoney(result.price, money)} each.` })
+          onDone({ toast: said, record: `${said}, on ${formatDate(date)}${atText}, at ${formatMoney(result.price, money)} each.` })
         )
         return
       }
       const result = await sellHolding(portfolioId, holding.id, quantity, date, {
         into: into ?? 'USD',
         manualPrice: typedIn,
+        at: moment,
       })
       if (!result.ok) return setError(result.error)
       const said = `Sold ${result.sellsAll ? `all of ${name}` : `${formatShares(qty)} ${name}`} for ${inOwn(result.intoAmount, result.into)}`
       startTransition(() =>
         onDone({
           toast: said,
-          record: `${said}, into ${currencyName(result.into)} cash, on ${formatDate(date)} at ${formatMoney(result.price, money)} each.`,
+          record: `${said}, into ${currencyName(result.into)} cash, on ${formatDate(date)}${atText}, at ${formatMoney(result.price, money)} each.`,
         })
       )
     })
@@ -274,7 +305,7 @@ export function TradeForm({
 
   /** What will be recorded, in words, shown above Confirm in the chat. */
   function preview(): string {
-    const when = date === today ? 'today' : `on ${formatDate(date)}`
+    const when = `${date === today ? 'today' : `on ${formatDate(date)}`}${atText}`
     const each = market ? ` at ${shownPrice(market, money)} each` : price !== null ? ` at ${formatMoney(price, money)} each` : ''
     if (buying) {
       const amount = byMoney ? `${inOwn(spent, spendCurrency)} of ${name} (about ${formatShares(qty)} ${units})` : `${formatShares(qty)} ${qty === 1 ? unit : units} of ${name}`
@@ -303,7 +334,7 @@ export function TradeForm({
                 type="date"
                 required
                 min={buying ? undefined : holding.openedAt}
-                max={today}
+                max={latest}
                 value={date}
                 onChange={(e) => changeDate(e.target.value)}
                 aria-invalid={dateProblem !== null && date !== ''}
@@ -315,10 +346,14 @@ export function TradeForm({
             </div>
             {localDate() !== today && (
               <p className="text-xs text-zinc-500 dark:text-zinc-400">
-                Dates follow New York, where US markets trade. It is {formatDate(today)} there now.
+                Dates follow New York, where US markets trade: it is {formatDate(today)} there now. Your own date works too once you
+                add the time it filled.
               </p>
             )}
           </div>
+
+          <TimeField id={`${uid}-time`} value={fillTime} onChange={changeTime} />
+          {timeInFuture && <p className={errorText}>That time hasn’t happened yet. Check the date and time.</p>}
 
           <div className="flex flex-col gap-2">
             <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
@@ -417,10 +452,12 @@ export function TradeForm({
                 <p data-testid="price-origin" className="text-xs leading-5 text-zinc-500 dark:text-zinc-400">
                   {market.basis === 'live'
                     ? 'Live price now'
-                    : market.date === date
-                      ? `Closing price on ${formatDayDate(market.date)}`
-                      : `Markets were closed on ${formatDayDate(date)}, so this is the last close before it, on ${formatDayDate(market.date)}`}
-                  , <PriceOrigin market={market} />.
+                    : market.basis === 'moment'
+                      ? capitalised(basisWords(market))
+                      : market.date === date
+                        ? `Closing price on ${formatDayDate(market.date)}`
+                        : `Markets were closed on ${formatDayDate(date)}, so this is the last close before it, on ${formatDayDate(market.date)}`}
+                  , <PriceOrigin market={market} />. <MomentRange market={market} />
                 </p>
               </div>
             ) : quote.status === 'done' && !quote.result.ok ? (

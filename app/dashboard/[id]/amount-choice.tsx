@@ -163,29 +163,51 @@ function SourceLink({ source }: { source: { name: string; url: string } }) {
 
 /**
  * Where a looked-up price came from, as words to follow "the live price now,":
- * quoted directly in your currency on a named exchange's market, or a named
- * US-dollar source, converted at today's rate from a named site.
+ * the exchange chosen for a coin and its market; a share's own market and
+ * currency; a coin quoted directly in your currency on a named exchange; or a
+ * named US-dollar source, converted at today's rate from a named site. Then
+ * anything worth saying about it, such as how USDT was counted.
  */
 export function PriceOrigin({ market }: { market: Extract<DatedPrice, { ok: true }> }) {
   const money = useMoney()
+  const source = market.source
+  const note = market.note ? ` (${market.note.replace(/\.$/, '')})` : ''
+  if (source.venue) {
+    return (
+      <>
+        on <SourceLink source={source} />
+        {source.pair ? `’s ${source.pair} market` : ''}
+        {note}
+      </>
+    )
+  }
+  if (market.quoted && source.currency) {
+    return (
+      <>
+        from <SourceLink source={source} />, in {source.currency} as the market quotes it{note}
+      </>
+    )
+  }
   if (market.quoted) {
     return (
       <>
-        quoted directly in {market.quoted.currency} on <SourceLink source={market.source} />
-        {market.source.pair ? `’s ${market.source.pair} market` : ''}
+        quoted directly in {market.quoted.currency} on <SourceLink source={source} />
+        {source.pair ? `’s ${source.pair} market` : ''}
+        {note}
       </>
     )
   }
   if (money.code === 'USD') {
     return (
       <>
-        from <SourceLink source={market.source} />
+        from <SourceLink source={source} />
+        {note}
       </>
     )
   }
   return (
     <>
-      from <SourceLink source={market.source} /> in US dollars ({formatMoney(market.price, USD)}), converted to{' '}
+      from <SourceLink source={source} /> in US dollars ({formatMoney(market.price, USD)}), converted to{' '}
       {money.code} at today&apos;s rate
       {money.provider && (
         <>
@@ -193,13 +215,20 @@ export function PriceOrigin({ market }: { market: Extract<DatedPrice, { ok: true
           from <SourceLink source={money.provider} />
         </>
       )}
+      {note}
     </>
   )
 }
 
-/** A looked-up price in the display currency: exactly as quoted when quoted directly in it. */
+/**
+ * A looked-up price in the display currency: exactly as quoted when quoted in
+ * it, and when quoted in another currency (won on Upbit, Singapore dollars on
+ * SGX), that figure with the display-currency equivalent after it.
+ */
 export function shownPrice(market: Extract<DatedPrice, { ok: true }>, money: Money): string {
-  return market.quoted ? inCurrency(market.quoted.price, market.quoted.currency) : formatMoney(market.price, money)
+  if (!market.quoted) return formatMoney(market.price, money)
+  const quoted = inCurrency(market.quoted.price, market.quoted.currency)
+  return market.quoted.currency === money.code ? quoted : `${quoted} (${formatMoney(market.price, money)})`
 }
 
 /** Every currency an amount can be typed in: yours first, then US dollars, then the rest. */

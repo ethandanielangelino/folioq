@@ -12,6 +12,7 @@ import { METALS, kindOf, normalizeAssetSymbol, type AssetKind } from '@/lib/asse
 import type { Amount, ChatAction, HowGot } from '@/lib/chat-actions'
 import { isCurrency } from '@/lib/currency'
 import type { Holding } from '@/lib/data'
+import { cleanPurpose } from '@/lib/history'
 
 const ACTIONS = ['add_holding', 'buy', 'sell', 'add_money', 'take_money_out', 'remove_holding'] as const
 
@@ -50,6 +51,11 @@ export const RECORD_CHANGE = {
       },
       into_cash: { type: 'STRING', description: 'Currency code of the portfolio cash a sale’s money goes into.' },
       sell_all: { type: 'BOOLEAN' },
+      purpose: {
+        type: 'STRING',
+        description:
+          'For add_money: where the money came from (e.g. "Salary", "Bonus"). For take_money_out: what it is for (e.g. "Rent", "School fees"). A few words, only if the owner said.',
+      },
     },
     required: ['action'],
   },
@@ -130,6 +136,7 @@ export function proposalFrom(
         currency: currency(args.money_currency) ?? (symbol && isCurrency(symbol) ? symbol : undefined),
         amount: positive(args.money_amount) ?? positive(args.quantity),
         date,
+        ...(cleanPurpose(args.purpose) ? { purpose: cleanPurpose(args.purpose) } : {}),
       },
       note: null,
     }

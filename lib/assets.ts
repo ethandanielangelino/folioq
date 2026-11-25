@@ -2,10 +2,12 @@
 // in the browser, on the server, and under plain `node --test`.
 //
 // Four kinds, each priced its own way:
-//   listed  a US-listed ticker (stock or ETF), from Finnhub. It can be grouped
-//           as stock, bond, property, or commodity, which only changes how it
-//           is grouped on the page.
-//   crypto  a coin such as BTC, from Coinbase (Kraken as a backup)
+//   listed  a listed ticker (stock or ETF): from Finnhub in the US, from Yahoo
+//           Finance with a market suffix elsewhere (D05.SI; see lib/venues.ts).
+//           It can be grouped as stock, bond, property, or commodity, which
+//           only changes how it is grouped on the page.
+//   crypto  a coin such as BTC, from the exchange chosen for it, else from
+//           Coinbase (Kraken as a backup)
 //   metal   gold or silver you own, per troy ounce, from gold-api.com
 //   cash    money held in a currency, converted at the exchange rate
 
@@ -146,5 +148,6 @@ export function normalizeAssetSymbol(input: string, assetClass: AssetClass): str
   if (kind === 'crypto') return /^[A-Z0-9]{2,10}$/.test(value) ? value : null
   if (kind === 'metal') return value in METALS ? value : null
   if (kind === 'cash') return /^[A-Z]{3}$/.test(value) ? value : null
-  return /^[A-Z0-9.\-]{1,12}$/.test(value) ? value : null
+  // Up to 15 characters, room for a market suffix: VOLV-B.ST, RELIANCE.NS.
+  return /^[A-Z0-9.\-]{1,15}$/.test(value) ? value : null
 }

@@ -12,6 +12,13 @@ export interface PriceSource {
   pair?: string
   /** True when no source answered and this is FolioQ's last saved price. */
   saved?: boolean
+  /**
+   * True when the price is from the exchange chosen for the holding (see
+   * lib/venues.ts); `pair` is then that exchange's market, e.g. "BTC/USDT".
+   */
+  venue?: boolean
+  /** The currency the source priced it in, when not US dollars: a share in Singapore is priced in SGD. */
+  currency?: string
 }
 
 export const FINNHUB: PriceSource = { name: 'Finnhub', url: 'https://finnhub.io' }
